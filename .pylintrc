@@ -1,0 +1,18 @@
+[TYPECHECK]
+ignored-modules = astropy.units
+disable = broad-except, too-few-public-methods, missing-docstring, invalid-name
+
+[SIMILARITIES]
+min-similarity-lines = 25
+ignore-imports = yes
+
+[FORMAT]
+max-line-length=120
+
+[DESIGN]
+max-branches = 15
+max-returns = 10
+max-args = 10
+max-locals = 50
+max-attributes = 20
+max-statements = 100

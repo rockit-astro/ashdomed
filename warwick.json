@@ -1,0 +1,18 @@
+{
+  "daemon": "warwick_dome",
+  "log_name": "dome@warwick",
+  "control_machines": ["WarwickDome", "WarwickTCS"],
+  "serial_port": "/dev/dome",
+  "serial_baud": 9600,
+  "serial_timeout": 3,
+  "latitude": 52.376861,
+  "longitude": -1.583861,
+  "altitude": 94,
+  "steps_per_rotation": 21948958,
+  "home_azimuth": 110,
+  "tracking_max_separation": 5,
+  "idle_loop_delay": 10,
+  "moving_loop_delay": 1,
+  "azimuth_move_timeout": 180,
+  "shutter_move_timeout": 180
+}

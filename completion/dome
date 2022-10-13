@@ -1,0 +1,22 @@
+_dome()
+{
+    local cur prev opts
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    opts="status open close stop heartbeat slew track engineering"
+
+    case "${prev}" in
+        heartbeat)
+            opts="disable"
+            ;;
+        engineering)
+            opts="enable disable"
+            ;;
+    esac
+
+    COMPREPLY=($(compgen -W "${opts}" -- ${cur}))
+    return 0
+}
+
+complete -F _dome dome

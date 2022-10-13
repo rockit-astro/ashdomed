@@ -1,0 +1,622 @@
+#!/usr/bin/env python3
+#
+# This file is part of ashdomed.
+#
+# ashdomed is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# ashdomed is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with ashdomed.  If not, see <http://www.gnu.org/licenses/>.
+
+"""Ash dome daemon"""
+
+import argparse
+import queue
+import sys
+import threading
+import time
+import traceback
+import Pyro4
+import serial
+from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+from astropy.time import Time
+import astropy.units as u
+from warwick.observatory.common import log
+from warwick.observatory.common.helpers import pyro_client_matches
+from warwick.observatory.ashdome import Config, CommandStatus, AzimuthStatus, ShutterStatus, HeartbeatStatus
+
+
+class DomeDaemon:
+    """Daemon class that wraps the RS422 interface"""
+    def __init__(self, config):
+        self._config = config
+        self._location = EarthLocation(
+            lat=config.latitude*u.deg,
+            lon=config.longitude*u.deg,
+            height=config.altitude*u.m)
+        self._port = None
+
+        self._state_lock = threading.RLock()
+        self._state_date = None
+        self._azimuth_status = AzimuthStatus.NotHomed
+        self._shutter_status = ShutterStatus.Closed
+        self._azimuth = 0
+
+        self._heartbeat_status = HeartbeatStatus.Disabled
+        self._heartbeat_expires = None
+
+        self._force_stopped = False
+        self._engineering_mode = False
+
+        self._comm_lock = threading.Lock()
+        self._command_queue = queue.Queue()
+        self._result_queue = queue.Queue()
+        self._move_complete_condition = threading.Condition()
+
+        self._tracking_coord = None
+
+        threading.Thread(target=self.__run, daemon=True).start()
+
+    def _wait_until(self, condition, timeout_seconds):
+        """
+        Block until a given condition returns true or a timeout occurs.
+        Returns True on complete, False on timeout or disconnection
+        """
+
+        start = Time.now()
+        while True:
+            with self._move_complete_condition:
+                self._move_complete_condition.wait(1)
+
+            if condition():
+                return True
+
+            if self._port is None:
+                return False
+
+            if Time.now() > start + timeout_seconds * u.s:
+                return False
+
+    def _open_connection(self):
+        """
+        Opens the serial connection to the dome.
+        Returns CommandStatus reflecting result
+        """
+        if self._port is not None:
+            return CommandStatus.NotDisconnected
+
+        try:
+            port = serial.Serial(self._config.serial_port,
+                                 self._config.serial_baud,
+                                 timeout=self._config.serial_timeout)
+            log.info(self._config.log_name, 'connected to dome')
+
+            # Flush any stale state
+            port.flushInput()
+            port.flushOutput()
+
+            # Reset motors and wait a few seconds for them to come online
+            if port.write(b'\x03') != 1:
+                raise serial.SerialException('Failed to send reboot command')
+
+            time.sleep(5)
+
+            with self._state_lock:
+                self._port = port
+
+                # Refresh state before considering the connection valid
+                self._update_state()
+
+            return CommandStatus.Succeeded
+        except Exception as exception:
+            print(f'Failed to read serial port ({exception})')
+            if self._port is not None:
+                with self._state_lock:
+                    self._port.close()
+                    self._port = None
+
+            return CommandStatus.Failed
+
+    def _close_connection(self):
+        """
+        Closes the serial connection to the dome.
+        Returns CommandStatus reflecting result
+        """
+        with self._state_lock:
+            if self._port is None:
+                return CommandStatus.NotConnected
+
+            try:
+                if self._port is not None:
+                    with self._state_lock:
+                        self._port.close()
+                        self._port = None
+                    log.info(self._config.log_name, 'disconnected from dome')
+                return CommandStatus.Succeeded
+            except Exception as exception:
+                print(f'Failed to close serial port ({exception})')
+                self._port = None
+                return CommandStatus.Failed
+
+    def send_command(self, command, has_response=False, ignore_error=False):
+        """
+        Sends a motor control command and validates that it was processed correctly.
+        Optionally returns the motor response if has_response is True.
+        Throws exceptions on error.
+        """
+        if self._port.write(('\n' + command + '\n').encode('ascii')) != len(command) + 2:
+            raise serial.SerialException('Failed to send command')
+
+        echo = self._port.readline().decode('ascii').strip()
+        if echo != command:
+            cb = command.encode('ascii').hex()
+            eb = echo.encode('ascii').hex()
+            raise serial.SerialException(f'echo mismatch `{command}` != `{echo}`; {cb} != {eb}')
+
+        if has_response:
+            response = self._port.readline().decode('ascii').strip()
+            #print(f'{command}: {response}')
+        else:
+            #print(f'{command}')
+            response = None
+
+        prompt = self._port.read(1).decode('ascii')
+        if ignore_error and prompt == '?':
+            self.send_command(f'{command[0]}ER 0')
+        elif prompt != '>':
+            raise serial.SerialException(f'prompt `{prompt}` is not `>`')
+
+        return response
+
+    def _update_state(self):
+        """Request and parse the status of the dome motors"""
+        if self._port is None:
+            return
+
+        # Shutter moving?
+        # Prompt will return ? instead of > when it reaches a limit; ignore and reset it
+        shutter_status = ShutterStatus.PartiallyOpen
+        response = self.send_command('OPR MV', has_response=True, ignore_error=True)
+        if response == '1':
+            # Shutter is moving
+            response = self.send_command('OPR V', has_response=True)
+            shutter_velocity = int(response)
+            if shutter_velocity < 0:
+                shutter_status = ShutterStatus.Closing
+            elif shutter_velocity > 0:
+                shutter_status = ShutterStatus.Opening
+        else:
+            # Shutter at limit?
+            response = self.send_command('OPR IL', has_response=True)
+            # Bit 2 is the closed limit
+            if int(response) & 0b0100 != 0:
+                shutter_status = ShutterStatus.Closed
+            # Bit 3 is the open limit
+            elif int(response) & 0b1000 != 0:
+                shutter_status = ShutterStatus.Open
+
+        # Azimuth position
+        response = self.send_command('APR P', has_response=True)
+        azimuth_steps = int(response)
+
+        # Azimuth moving?
+        azimuth_status = AzimuthStatus.Idle
+        response = self.send_command('APR MV', has_response=True)
+        if response == '1':
+            # Azimuth is moving
+            if self._azimuth_status == AzimuthStatus.Homing:
+                azimuth_status = AzimuthStatus.Homing
+            else:
+                azimuth_status = AzimuthStatus.Moving
+        else:
+            # Azimuth is stationary
+            if self._azimuth_status == AzimuthStatus.Homing:
+                # Set the motor steps to zero at the home position
+                self.send_command('AP=0')
+                azimuth_steps = self._config.home_azimuth
+
+            if self._azimuth_status == AzimuthStatus.NotHomed:
+                azimuth_status = AzimuthStatus.NotHomed
+
+        with self._state_lock:
+            self._state_date = Time.now()
+            self._shutter_status = shutter_status
+            self._azimuth = azimuth_steps * 360.0 / self._config.steps_per_rotation + self._config.home_azimuth
+            self._azimuth_status = azimuth_status
+
+            if shutter_status == ShutterStatus.Closed and self._heartbeat_status == HeartbeatStatus.TrippedClosing:
+                self._heartbeat_status = HeartbeatStatus.TrippedIdle
+
+    def process_request(self, request, data):
+        """
+        Process a command sent by the user
+        Returns a CommandStatus that is pushed to the results queue
+        """
+        if self._port is None:
+            return CommandStatus.NotConnected
+
+        if request != 'engineering_mode' and self._engineering_mode:
+            return CommandStatus.EngineeringModeActive
+
+        # Only stop is valid when moving
+        if request in ['open_shutter', 'close_shutter', 'engineering_mode']:
+            if self._heartbeat_status == HeartbeatStatus.TrippedClosing:
+                return CommandStatus.HeartbeatCloseInProgress
+
+            if self._heartbeat_status == HeartbeatStatus.TrippedIdle:
+                return CommandStatus.HeartbeatTimedOut
+
+            if self._shutter_status in [ShutterStatus.Opening, ShutterStatus.Closing]:
+                return CommandStatus.Blocked
+
+        if request in ['home_azimuth', 'slew_azimuth', 'engineering_mode'] and \
+                self._azimuth_status in [AzimuthStatus.Moving, AzimuthStatus.Homing]:
+            return CommandStatus.Blocked
+
+        if request == 'stop_shutter':
+            self.send_command('OSL 0')
+        elif request == 'open_shutter':
+            self.send_command('OMR 100000000', ignore_error=True)
+            self._shutter_status = ShutterStatus.Opening
+        elif request in ['close_shutter', 'heartbeat_expired']:
+            self.send_command('OMR -100000000', ignore_error=True)
+            self._shutter_status = ShutterStatus.Closing
+            if request == 'heartbeat_expired':
+                self._heartbeat_status = HeartbeatStatus.TrippedClosing
+        elif request == 'stop_azimuth':
+            self.send_command('ASL 0')
+        elif request == 'home_azimuth':
+            self.send_command('AHM 1')
+            self._azimuth_status = AzimuthStatus.Homing
+        elif request == 'slew_azimuth':
+            if self._azimuth_status == AzimuthStatus.NotHomed:
+                return CommandStatus.NotHomed
+
+            # The internal azimuth angle is stored unwrapped relative to the last home position
+            # so it may be outside the 0-360 range if it has done one or more complete rotations.
+            # Our requested position can be reached with either a CW or a CCW rotation, so we must
+            # test which of the three potential unwrapped target angles is closest
+            rotations = self._azimuth // 360
+            target = separation = None
+            for i in range(-1, 2):
+                t = data + (rotations + i) * 360
+                s = abs(self._azimuth - t)
+                if separation is None or s < separation:
+                    target = t
+                    separation = s
+
+            steps = int((target - self._config.home_azimuth) / 360. * self._config.steps_per_rotation)
+            self.send_command(f'AMA {steps}')
+            self._azimuth_status = AzimuthStatus.Moving
+        elif request == 'heartbeat':
+            if data == 0:
+                self._heartbeat_status = HeartbeatStatus.Disabled
+                self._heartbeat_expires = None
+            elif self._heartbeat_status == HeartbeatStatus.TrippedClosing:
+                return CommandStatus.HeartbeatCloseInProgress
+            elif self._heartbeat_status == HeartbeatStatus.TrippedIdle:
+                return CommandStatus.HeartbeatTimedOut
+            elif data < 0 or data >= 180:
+                return CommandStatus.HeartbeatInvalidTimeout
+            else:
+                self._heartbeat_status = HeartbeatStatus.Active
+                self._heartbeat_expires = Time.now() + data * u.s
+        elif request == 'engineering_mode':
+            if self._heartbeat_status != HeartbeatStatus.Disabled:
+                return CommandStatus.EngineeringModeRequiresHeartbeatDisabled
+
+            self._engineering_mode = data
+            if data:
+                self._tracking_coord = None
+        else:
+            print(f'Unknown request `{request}`')
+            return CommandStatus.Failed
+
+        return CommandStatus.Succeeded
+
+    def __run(self):
+        """Background thread managing communication over the serial connection"""
+        delay = self._config.idle_loop_delay
+        while True:
+            try:
+                request, data = self._command_queue.get(timeout=delay)
+            except queue.Empty:
+                request, data = None, None
+
+            if request == 'connect':
+                self._result_queue.put(self._open_connection())
+                continue
+
+            if request == 'disconnect':
+                self._result_queue.put(self._close_connection())
+                continue
+
+            result = CommandStatus.NotConnected
+            was_moving = self._shutter_status in [ShutterStatus.Opening, ShutterStatus.Closing] \
+                or self._azimuth_status in [AzimuthStatus.Homing, AzimuthStatus.Moving]
+
+            try:
+                self._update_state()
+
+                # Update heartbeat if needed
+                if self._heartbeat_status == HeartbeatStatus.Active and Time.now() > self._heartbeat_expires:
+                    self.process_request('heartbeat_expired', None)
+
+                # Update tracking coordinate if needed
+                elif request is None and self._tracking_coord is not None and \
+                        self._azimuth_status == AzimuthStatus.Idle:
+                    frame = AltAz(obstime=Time.now(), location=self._location)
+                    azimuth = self._tracking_coord.transform_to(frame).az.to_value(u.deg)
+                    print(f'Tracking delta: {azimuth - self._azimuth:.1f}')
+                    if abs(azimuth - self._azimuth) > self._config.tracking_max_separation:
+                        # Check the direction of motion
+                        future_frame = AltAz(obstime=Time.now() + 1 * u.minute, location=self._location)
+                        future_azimuth = self._tracking_coord.transform_to(future_frame).az.to_value(u.deg)
+                        direction = 1 if future_azimuth > azimuth or future_azimuth < azimuth - 180 else -1
+
+                        target_azimuth = azimuth + direction * self._config.tracking_max_separation
+                        self.process_request('slew_azimuth', target_azimuth)
+
+                if request is not None:
+                    result = self.process_request(request, data)
+
+                    # Refresh the state to ensure a valid view of the controller state before returning
+                    self._update_state()
+
+            except Exception as exception:
+                with self._state_lock:
+                    if self._port is not None:
+                        self._port.close()
+                        self._port = None
+
+                print(f'Failed to read serial port ({exception})')
+                log.error(self._config.log_name, 'Lost serial connection')
+                traceback.print_exc(file=sys.stdout)
+            finally:
+                if request is not None:
+                    self._result_queue.put(result)
+
+                is_moving = self._shutter_status in [ShutterStatus.Opening, ShutterStatus.Closing] \
+                    or self._azimuth_status in [AzimuthStatus.Homing, AzimuthStatus.Moving]
+
+                if was_moving and not is_moving:
+                    with self._move_complete_condition:
+                        self._move_complete_condition.notify_all()
+
+                delay = self._config.moving_loop_delay if is_moving else self._config.idle_loop_delay
+
+                if self._heartbeat_status == HeartbeatStatus.Active and \
+                        self._heartbeat_expires < Time.now() + delay * u.s:
+                    delay = 1
+
+    @Pyro4.expose
+    def open_shutter(self):
+        """
+        Open the dome shutter
+        :return: CommandStatus indicating success or error code
+        """
+        if not pyro_client_matches(self._config.control_ips):
+            return CommandStatus.InvalidControlIP
+
+        with self._comm_lock:
+            self._command_queue.put(('open_shutter', None))
+            result = self._result_queue.get()
+
+        if result != CommandStatus.Succeeded:
+            return result
+
+        if not self._wait_until(lambda: self._shutter_status == ShutterStatus.Open, self._config.shutter_move_timeout):
+            return CommandStatus.Failed
+
+        return CommandStatus.Succeeded
+
+    @Pyro4.expose
+    def close_shutter(self):
+        """
+        Close the dome shutter
+        :return: CommandStatus indicating success or error code
+        """
+        if not pyro_client_matches(self._config.control_ips):
+            return CommandStatus.InvalidControlIP
+
+        with self._comm_lock:
+            self._command_queue.put(('close_shutter', None))
+            result = self._result_queue.get()
+
+        if result != CommandStatus.Succeeded:
+            return result
+
+        if not self._wait_until(lambda: self._shutter_status == ShutterStatus.Closed,
+                                self._config.shutter_move_timeout):
+            return CommandStatus.Failed
+
+        return CommandStatus.Succeeded
+
+    @Pyro4.expose
+    def stop_shutter(self):
+        """Stops the shutter motor"""
+        if not pyro_client_matches(self._config.control_ips):
+            return CommandStatus.InvalidControlIP
+
+        if self._heartbeat_status == HeartbeatStatus.TrippedClosing:
+            return CommandStatus.HeartbeatCloseInProgress
+
+        with self._comm_lock:
+            self._command_queue.put(('stop_shutter', None))
+            return self._result_queue.get()
+
+    @Pyro4.expose
+    def stop_azimuth(self):
+        """Stops the azimuth motor"""
+        if not pyro_client_matches(self._config.control_ips):
+            return CommandStatus.InvalidControlIP
+
+        with self._comm_lock:
+            self._tracking_coord = None
+            self._command_queue.put(('stop_azimuth', None))
+            return self._result_queue.get()
+
+    @Pyro4.expose
+    def home_azimuth(self):
+        """Home the azimuth motor"""
+        if not pyro_client_matches(self._config.control_ips):
+            return CommandStatus.InvalidControlIP
+
+        with self._comm_lock:
+            self._tracking_coord = None
+            self._command_queue.put(('home_azimuth', None))
+            result = self._result_queue.get()
+
+        if result != CommandStatus.Succeeded:
+            return result
+
+        if not self._wait_until(lambda: self._azimuth_status == AzimuthStatus.Idle, self._config.azimuth_move_timeout):
+            return CommandStatus.Failed
+
+        return CommandStatus.Succeeded
+
+    @Pyro4.expose
+    def slew_azimuth(self, azimuth):
+        """Slew the dome to the requested azimuth"""
+        if not pyro_client_matches(self._config.control_ips):
+            return CommandStatus.InvalidControlIP
+
+        with self._comm_lock:
+            self._tracking_coord = None
+            self._command_queue.put(('slew_azimuth', azimuth))
+            result = self._result_queue.get()
+
+        if result != CommandStatus.Succeeded:
+            return result
+
+        if not self._wait_until(lambda: self._azimuth_status == AzimuthStatus.Idle, self._config.azimuth_move_timeout):
+            return CommandStatus.Failed
+
+        return CommandStatus.Succeeded
+
+    @Pyro4.expose
+    def track_radec(self, ra_degrees, dec_degrees):
+        """Align the dome slit and begin tracking the given RA and Dec"""
+        if not pyro_client_matches(self._config.control_ips):
+            return CommandStatus.InvalidControlIP
+
+        coord = SkyCoord(ra=ra_degrees, dec=dec_degrees, unit=u.deg, frame='icrs')
+        with self._comm_lock:
+            self._tracking_coord = None
+            azimuth = coord.transform_to(AltAz(obstime=Time.now(), location=self._location)).az.to_value(u.deg)
+            self._command_queue.put(('slew_azimuth', azimuth))
+            result = self._result_queue.get()
+
+        if result != CommandStatus.Succeeded:
+            return result
+
+        if not self._wait_until(lambda: self._azimuth_status == AzimuthStatus.Idle, self._config.azimuth_move_timeout):
+            return CommandStatus.Failed
+
+        with self._comm_lock:
+            self._tracking_coord = coord
+
+        return CommandStatus.Succeeded
+
+    @Pyro4.expose
+    def set_engineering_mode(self, enabled):
+        """Enable engineering mode (all movement commands disabled)"""
+        if not pyro_client_matches(self._config.control_ips):
+            return CommandStatus.InvalidControlIP
+
+        with self._comm_lock:
+            self._tracking_coord = None
+            self._command_queue.put(('engineering_mode', enabled))
+            return self._result_queue.get()
+
+    @Pyro4.expose
+    def set_heartbeat_timer(self, timeout):
+        """Enable or disable the auto-close countdown"""
+        if not pyro_client_matches(self._config.control_ips):
+            return CommandStatus.InvalidControlIP
+
+        with self._comm_lock:
+            self._command_queue.put(('heartbeat', timeout))
+            return self._result_queue.get()
+
+    @Pyro4.expose
+    def initialize(self):
+        """Connects to the dome motors"""
+        if not pyro_client_matches(self._config.control_ips):
+            return CommandStatus.InvalidControlIP
+
+        with self._comm_lock:
+            self._command_queue.put(('connect', None))
+            return self._result_queue.get()
+
+    @Pyro4.expose
+    def shutdown(self):
+        """Disconnects from the dome motors"""
+        if not pyro_client_matches(self._config.control_ips):
+            return CommandStatus.InvalidControlIP
+
+        with self._comm_lock:
+            self._command_queue.put(('disconnect', None))
+            return self._result_queue.get()
+
+    @Pyro4.expose
+    def status(self):
+        """Query the latest status."""
+        with self._state_lock:
+            data = {
+                'date': Time.now().strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'azimuth_status': AzimuthStatus.Disconnected,
+                'azimuth_status_label': AzimuthStatus.label(AzimuthStatus.Disconnected),
+                'shutter': ShutterStatus.Disconnected,
+                'shutter_label': ShutterStatus.label(ShutterStatus.Disconnected),
+                'engineering_mode': self._engineering_mode
+            }
+
+            if self._port is None:
+                return data
+
+            data.update({
+                'date': self._state_date.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'azimuth': self._azimuth % 360,
+                'azimuth_status': self._azimuth_status,
+                'azimuth_status_label': AzimuthStatus.label(self._azimuth_status),
+                'shutter': self._shutter_status,
+                'shutter_label': ShutterStatus.label(self._shutter_status),
+                'closed': self._shutter_status == ShutterStatus.Closed,
+                'heartbeat_status': self._heartbeat_status,
+                'heartbeat_status_label': HeartbeatStatus.label(self._heartbeat_status),
+            })
+
+            if self._heartbeat_expires is not None:
+                data['heartbeat_remaining'] = max((self._heartbeat_expires - Time.now()).to_value(u.s), 0)
+
+            if self._tracking_coord is not None:
+                frame = AltAz(obstime=Time.now(), location=self._location)
+                data.update({
+                    'tracking_ra': self._tracking_coord.ra.to_value(u.deg),
+                    'tracking_dec': self._tracking_coord.dec.to_value(u.deg),
+                    'tracking_azimuth': self._tracking_coord.transform_to(frame).az.to_value(u.deg)
+                })
+        return data
+
+    # pylint: disable=no-self-use
+    @Pyro4.expose
+    def ping(self):
+        """Returns immediately with a success status"""
+        return CommandStatus.Succeeded
+    # pylint: enable=no-self-use
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Dome daemon')
+    parser.add_argument('config', help='Path to configuration json file')
+    args = parser.parse_args()
+    c = Config(args.config)
+    c.daemon.launch(DomeDaemon(c))

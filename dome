@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+#
+# This file is part of ashdomed.
+#
+# ashdomed is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# ashdomed is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with ashdomed.  If not, see <http://www.gnu.org/licenses/>.
+
+"""Commandline client for controlling ashdomed"""
+
+import datetime
+import glob
+import os
+import sys
+from astropy.coordinates import SkyCoord
+import astropy.units as u
+import Pyro4
+from warwick.observatory.ashdome import Config, CommandStatus, AzimuthStatus, ShutterStatus, HeartbeatStatus
+from warwick.observatory.common import TFmt
+
+SCRIPT_NAME = os.path.basename(sys.argv[0])
+sys.excepthook = Pyro4.util.excepthook
+
+
+def run_command(command, args):
+    """Runs a daemon command, handling error messages"""
+    if 'DOMED_CONFIG_PATH' in os.environ:
+        config = Config(os.environ['DOMED_CONFIG_PATH'])
+    else:
+        # Load the config file defined in the DOMED_CONFIG_PATH environment variable or from the
+        # default system location (/etc/domed/). Exit with an error if zero or multiple are found.
+        files = glob.glob("/etc/domed/*.json")
+        if len(files) != 1:
+            print('error: failed to guess the default config file. ' +
+                  'Run as DOMED_CONFIG_PATH=/path/to/config.json dome <command>')
+            return 1
+
+        config = Config(files[0])
+
+    try:
+        ret = command(config, args)
+    except KeyboardInterrupt:
+        # ctrl-c terminates the running command
+        if command in [open_shutter, close_shutter]:
+            ret = stop_shutter(config, args)
+        else:
+            ret = stop_azimuth(config, args)
+
+        # Report successful stop
+        if ret == 0:
+            ret = -100
+    except Pyro4.errors.CommunicationError:
+        ret = -101
+
+    # Print message associated with error codes, except for -1 (error handled locally)
+    if ret not in [-1, 0]:
+        print(CommandStatus.message(ret))
+    sys.exit(ret)
+
+
+def print_status(config, _):
+    """Prints the dome status in human-readable form"""
+    with config.daemon.connect() as dome:
+        status = dome.status()
+
+    date = datetime.datetime.strptime(status['date'], '%Y-%m-%dT%H:%M:%SZ')
+    print(f'Dome status at: {TFmt.Bold}{date}{TFmt.Clear}:')
+    if status['azimuth_status'] in [AzimuthStatus.Idle, AzimuthStatus.Moving]:
+        azimuth_label = f'  Azimuth: {TFmt.Bold}{status["azimuth"]:.1f}\u00B0{TFmt.Clear}'
+        if status['azimuth_status'] == AzimuthStatus.Moving:
+            azimuth_label += f' ({AzimuthStatus.label(status["azimuth_status"], formatting=True)})'
+        elif 'tracking_ra' in status:
+            coords = SkyCoord(ra=status['tracking_ra'], dec=status['tracking_dec'], unit=u.deg)
+            ra_desc = coords.ra.to(u.hourangle).to_string(sep=':', precision=0)
+            dec_desc = coords.dec.to(u.deg).to_string(sep=':', precision=0)
+            azimuth_label += f' ({TFmt.Bold + TFmt.Green}TRACKING {TFmt.Clear}' +\
+                             f'{TFmt.Bold}{ra_desc} {dec_desc}{TFmt.Clear})'
+    else:
+        azimuth_label = f'  Azimuth: {AzimuthStatus.label(status["azimuth_status"], formatting=True)}'
+
+    print(azimuth_label)
+
+    print(f'  Shutter: {ShutterStatus.label(status["shutter"], formatting=True)}')
+
+    eng_mode = TFmt.Red + 'ENABLED' if status['engineering_mode'] else TFmt.Green + 'DISABLED'
+    print(f'Eng. mode: {TFmt.Bold}{eng_mode}{TFmt.Clear}')
+    if 'heartbeat_status' in status:
+        print(f'Heartbeat: {HeartbeatStatus.label(status["heartbeat_status"], formatting=True)}')
+        if status['heartbeat_status'] == HeartbeatStatus.Active:
+            print(f'Time remaining: {TFmt.Bold}{status["heartbeat_remaining"]:.1f}{TFmt.Clear}')
+    return 0
+
+
+def stop_shutter(config, _):
+    """Stops any active shutter movement"""
+    with config.daemon.connect() as dome:
+        return dome.stop_shutter()
+
+
+def stop_azimuth(config, _):
+    """Stops any active azimuth movement"""
+    with config.daemon.connect() as dome:
+        return dome.stop_azimuth()
+
+
+def stop(config, _):
+    """Stops any active dome movement"""
+    with config.daemon.connect() as dome:
+        azimuth = dome.stop_azimuth()
+        shutter = dome.stop_shutter()
+        return azimuth if shutter == CommandStatus.Succeeded else shutter
+
+
+def open_shutter(config, _):
+    """Opens the dome shutters"""
+    ping_domed(config)
+    with config.daemon.connect(timeout=0) as dome:
+        return dome.open_shutter()
+
+
+def close_shutter(config, _):
+    """Closes the dome shutters"""
+    ping_domed(config)
+    with config.daemon.connect(timeout=0) as dome:
+        return dome.close_shutter()
+
+
+def slew_azimuth(config, args):
+    """Slew the dome to a requested azimuth"""
+    if args:
+        try:
+            azimuth = float(args[0])
+        except ValueError as e:
+            print(f'error: {e}')
+            return -1
+
+        ping_domed(config)
+        with config.daemon.connect(timeout=0) as dome:
+            return dome.slew_azimuth(azimuth)
+
+    print(f'usage: {SCRIPT_NAME} slew <azimuth degrees>')
+    return -1
+
+
+def track(config, args):
+    """Align the dome slit and begin tracking the given RA and Dec"""
+    if len(args) != 2:
+        print(f'usage: {SCRIPT_NAME} track <HH:MM:SS.S> <DD:MM:SS.S>')
+        return -1
+
+    try:
+        coord = SkyCoord(ra=args[0], dec=args[1], unit=(u.hourangle, u.deg))
+    except ValueError as e:
+        print(f'error: {e}')
+        return -1
+
+    ping_domed(config)
+    with config.daemon.connect(timeout=0) as dome:
+        return dome.track_radec(coord.ra.to_value(u.deg), coord.dec.to_value(u.deg))
+
+
+def home(config, _):
+    """Homes the azimuth motor"""
+    ping_domed(config)
+    with config.daemon.connect(timeout=0) as dome:
+        return dome.home_azimuth()
+
+
+def engineering_mode(config, args):
+    """Enable or disable engineering mode to disable dome movement"""
+    if args:
+        with config.daemon.connect() as dome:
+            if args[0] == 'disable':
+                return dome.set_engineering_mode(False)
+
+            if args[0] == 'enable':
+                return dome.set_engineering_mode(True)
+
+    print(f'usage: {SCRIPT_NAME} engineering (disable|enable)')
+    return -1
+
+
+def heartbeat(config, args):
+    """Configure the dome close heartbeat"""
+    if args:
+        with config.daemon.connect() as dome:
+            if args[0] == 'disable':
+                return dome.set_heartbeat_timer(0)
+
+            if args[0] == 'enable':
+                if len(args) > 1:
+                    timeout = int(args[1])
+                    if timeout > 0:
+                        return dome.set_heartbeat_timer(timeout)
+            print(f'usage: {SCRIPT_NAME} heartbeat enable <timeout in seconds>')
+            return -1
+    print(f'usage: {SCRIPT_NAME} heartbeat (disable|enable)')
+    return -1
+
+
+def initialize(config, _):
+    """Connect to the dome"""
+    with config.daemon.connect(timeout=10) as dome:
+        return dome.initialize()
+
+
+def shutdown(config, _):
+    """Disconnect from the dome"""
+    with config.daemon.connect() as dome:
+        return dome.shutdown()
+
+
+def ping_domed(config):
+    """Check that the dome daemon is alive"""
+    with config.daemon.connect() as dome:
+        dome.ping()
+
+
+def print_usage():
+    """Prints the utility help"""
+    print(f'Usage: {SCRIPT_NAME} <command>')
+    print()
+    print('   status        print a human-readable summary of the dome status')
+    print('   open          open the shutter')
+    print('   close         close the shutter')
+    print('   stop          stop manual open/close command (excludes heartbeat)')
+    print('   heartbeat     configure the dome auto-close timeout')
+    print('   slew          slew to the given azimuth')
+    print('   track         track the given RA and Dec')
+    print('   home          home the dome azimuth')
+    print('   engineering   enable or disable engineering mode')
+    print('   init          connect to the dome')
+    print('   kill          disconnect from the dome')
+    print()
+
+    return 1
+
+
+if __name__ == '__main__':
+    commands = {
+        'status': print_status,
+        'open': open_shutter,
+        'close': close_shutter,
+        'stop': stop,
+        'slew': slew_azimuth,
+        'track': track,
+        'home': home,
+        'engineering': engineering_mode,
+        'heartbeat': heartbeat,
+        'init': initialize,
+        'kill': shutdown
+    }
+
+    if len(sys.argv) >= 2 and sys.argv[1] in commands:
+        sys.exit(run_command(commands[sys.argv[1]], sys.argv[2:]))
+
+    sys.exit(print_usage())
