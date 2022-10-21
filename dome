@@ -27,6 +27,13 @@ import Pyro4
 from warwick.observatory.ashdome import Config, CommandStatus, AzimuthStatus, ShutterStatus, HeartbeatStatus
 from warwick.observatory.common import TFmt
 
+# Fix terminal coloring on Windows clients
+try:
+    import colorama
+    colorama.init()
+except ImportError:
+    pass
+
 SCRIPT_NAME = os.path.basename(sys.argv[0])
 sys.excepthook = Pyro4.util.excepthook
 
