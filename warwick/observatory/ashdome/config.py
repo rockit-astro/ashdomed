@@ -26,8 +26,10 @@ CONFIG_SCHEMA = {
     'additionalProperties': False,
     'required': [
         'daemon', 'log_name', 'control_machines', 'serial_port', 'serial_baud', 'serial_timeout',
-        'latitude', 'longitude', 'altitude', 'steps_per_rotation', 'home_azimuth', 'tracking_max_separation',
-        'idle_loop_delay', 'moving_loop_delay', 'azimuth_move_timeout', 'shutter_move_timeout'
+        'latitude', 'longitude', 'altitude', 'steps_per_rotation',
+        'dome_radius_cm', 'telescope_offset_x_cm', 'telescope_offset_y_cm',
+        'home_azimuth', 'tracking_max_separation', 'idle_loop_delay', 'moving_loop_delay',
+        'azimuth_move_timeout', 'shutter_move_timeout'
     ],
     'properties': {
         'daemon': {
@@ -72,6 +74,19 @@ CONFIG_SCHEMA = {
         'steps_per_rotation': {
             'type': 'number',
             'minimum': 0
+        },
+        'dome_radius_cm': {
+            'type': 'integer'
+        },
+        'telescope_offset_x_cm': {
+            'type': 'integer',
+            'minimum': -100,
+            'maximum': 100
+        },
+        'telescope_offset_y_cm': {
+            'type': 'integer',
+            'minimum': -100,
+            'maximum': 100
         },
         'home_azimuth': {
             'type': 'number',
@@ -121,6 +136,9 @@ class Config:
         self.serial_baud = config_json['serial_baud']
         self.serial_timeout = config_json['serial_timeout']
         self.steps_per_rotation = config_json['steps_per_rotation']
+        self.dome_radius_cm = config_json['dome_radius_cm']
+        self.telescope_offset_x_cm = config_json['telescope_offset_x_cm']
+        self.telescope_offset_y_cm = config_json['telescope_offset_y_cm']
         self.home_azimuth = config_json['home_azimuth']
         self.tracking_max_separation = config_json['tracking_max_separation']
         self.idle_loop_delay = int(config_json['idle_loop_delay'])

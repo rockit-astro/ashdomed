@@ -28,6 +28,7 @@ import serial
 from astropy.coordinates import AltAz, EarthLocation, SkyCoord
 from astropy.time import Time
 import astropy.units as u
+import numpy as np
 from warwick.observatory.common import log
 from warwick.observatory.common.helpers import pyro_client_matches
 from warwick.observatory.ashdome import Config, CommandStatus, AzimuthStatus, ShutterStatus, HeartbeatStatus
@@ -87,6 +88,29 @@ class DomeDaemon:
 
             if Time.now() > start + timeout_seconds * u.s:
                 return False
+
+    def _tracking_azimuth(self, time):
+        """
+        Evaluates the dome azimuth required to track the target coordinates
+        at a given time. Corrects for the fact that the telescope dec axis
+        is not in the middle of the dome.
+        """
+        frame = AltAz(obstime=time, location=self._location)
+        az = self._tracking_coord.transform_to(frame).az.to_value(u.deg)
+
+        # Decompose the requested az into x (south) and y (east) coords
+        x = self._config.dome_radius_cm * np.cos(np.radians(az))
+        y = self._config.dome_radius_cm * np.sin(np.radians(az))
+
+        # Find the vector from the telescope to the radius of the dome
+        delta_x = x - self._config.telescope_offset_x_cm
+        delta_y = y - self._config.telescope_offset_y_cm
+
+        corrected_az = np.degrees(np.arctan2(delta_y, delta_x))
+        if corrected_az < 0:
+            corrected_az += 360
+
+        return corrected_az
 
     def _open_connection(self):
         """
@@ -356,13 +380,17 @@ class DomeDaemon:
                 # Update tracking coordinate if needed
                 elif request is None and self._tracking_coord is not None and \
                         self._azimuth_status == AzimuthStatus.Idle:
-                    frame = AltAz(obstime=Time.now(), location=self._location)
-                    azimuth = self._tracking_coord.transform_to(frame).az.to_value(u.deg)
-                    print(f'Tracking delta: {azimuth - self._azimuth:.1f}')
-                    if abs(azimuth - self._azimuth) > self._config.tracking_max_separation:
+                    azimuth = self._tracking_azimuth(Time.now())
+                    delta = azimuth - self._azimuth
+                    if delta < -180:
+                        delta += 360
+                    if delta > 180:
+                        delta -= 360
+
+                    print(f'Tracking delta: {delta:.1f}')
+                    if abs(delta) > self._config.tracking_max_separation:
                         # Check the direction of motion
-                        future_frame = AltAz(obstime=Time.now() + 1 * u.minute, location=self._location)
-                        future_azimuth = self._tracking_coord.transform_to(future_frame).az.to_value(u.deg)
+                        future_azimuth = self._tracking_azimuth(Time.now() + 1 * u.minute)
                         direction = 1 if future_azimuth > azimuth or future_azimuth < azimuth - 180 else -1
 
                         target_azimuth = azimuth + direction * self._config.tracking_max_separation
