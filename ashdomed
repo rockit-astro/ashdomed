@@ -32,6 +32,10 @@ from warwick.observatory.common import log
 from warwick.observatory.common.helpers import pyro_client_matches
 from warwick.observatory.ashdome import Config, CommandStatus, AzimuthStatus, ShutterStatus, HeartbeatStatus
 
+# HACK: Disable IERS download to work around the internet being blocked
+from astropy.utils import iers
+iers.conf.auto_download = False
+iers.conf.auto_max_age = None
 
 class DomeDaemon:
     """Daemon class that wraps the RS422 interface"""
