@@ -13,7 +13,7 @@
   "telescope_offset_x_cm": -20,
   "telescope_offset_y_cm": 0,
   "home_azimuth": 110,
-  "tracking_max_separation": 5,
+  "tracking_max_separation": 2,
   "idle_loop_delay": 10,
   "moving_loop_delay": 1,
   "azimuth_move_timeout": 180,
