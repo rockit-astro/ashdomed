@@ -89,7 +89,7 @@ class DomeDaemon:
             if Time.now() > start + timeout_seconds * u.s:
                 return False
 
-    def _offset_azimuth(self, azimuth):
+    def _offset_azimuth(self, altitude, azimuth):
         """
         Evaluates the dome azimuth required to center a given telescope
         azimuth in the slit. Corrects for the fact that the telescope
@@ -97,12 +97,12 @@ class DomeDaemon:
         """
 
         # Decompose the requested az into x (south) and y (east) coords
-        x = self._config.dome_radius_cm * np.cos(np.radians(azimuth))
-        y = self._config.dome_radius_cm * np.sin(np.radians(azimuth))
+        x = self._config.dome_radius_cm * np.cos(np.radians(azimuth)) * np.cos(np.radians(altitude))
+        y = self._config.dome_radius_cm * np.sin(np.radians(azimuth)) * np.cos(np.radians(altitude))
 
         # Find the vector from the telescope to the radius of the dome
         delta_x = x - self._config.telescope_offset_x_cm
-        delta_y = y - self._config.telescope_offset_y_cm
+        delta_y = y
 
         corrected_az = np.degrees(np.arctan2(delta_y, delta_x))
         if corrected_az < 0:
@@ -116,9 +116,8 @@ class DomeDaemon:
         a given ra,dec coordinate at a given time.
         """
         frame = AltAz(obstime=time, location=self._location)
-        azimuth = self._tracking_coord.transform_to(frame).az.to_value(u.deg)
-        return self._offset_azimuth(azimuth)
-
+        altaz = self._tracking_coord.transform_to(frame)
+        return self._offset_azimuth(altaz.alt.to_value(u.deg), altaz.az.to_value(u.deg))
 
     def _open_connection(self):
         """
@@ -531,7 +530,7 @@ class DomeDaemon:
         if position == 'antisolar':
             frame = AltAz(obstime=Time.now(), location=self._location)
             azimuth = (get_sun(Time.now()).transform_to(frame).az + 180 * u.deg).to_value(u.deg)
-            return self.slew_azimuth(azimuth)
+            return self.slew_azimuth(self._offset_azimuth(75, azimuth))
 
         if position == 'park':
             return self.slew_azimuth(110)

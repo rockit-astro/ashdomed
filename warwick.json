@@ -11,7 +11,6 @@
   "steps_per_rotation": 21948958,
   "dome_radius_cm": 221,
   "telescope_offset_x_cm": -20,
-  "telescope_offset_y_cm": 0,
   "home_azimuth": 110,
   "tracking_max_separation": 2,
   "idle_loop_delay": 10,
