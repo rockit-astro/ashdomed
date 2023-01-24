@@ -141,9 +141,14 @@ def close_shutter(config, _):
         return dome.close_shutter()
 
 
-def slew_azimuth(config, args):
+def slew(config, args):
     """Slew the dome to a requested azimuth"""
     if args:
+        if args[0] in ['antisolar', 'park']:
+            ping_domed(config)
+            with config.daemon.connect(timeout=0) as dome:
+                return dome.slew_named(args[0])
+
         try:
             azimuth = float(args[0])
         except ValueError as e:
@@ -154,7 +159,7 @@ def slew_azimuth(config, args):
         with config.daemon.connect(timeout=0) as dome:
             return dome.slew_azimuth(azimuth)
 
-    print(f'usage: {SCRIPT_NAME} slew <azimuth degrees>')
+    print(f'usage: {SCRIPT_NAME} slew [antisolar|park|<azimuth degrees>]')
     return -1
 
 
@@ -258,7 +263,7 @@ if __name__ == '__main__':
         'open': open_shutter,
         'close': close_shutter,
         'stop': stop,
-        'slew': slew_azimuth,
+        'slew': slew,
         'track': track,
         'home': home,
         'engineering': engineering_mode,

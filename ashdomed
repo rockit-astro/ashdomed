@@ -25,7 +25,7 @@ import time
 import traceback
 import Pyro4
 import serial
-from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+from astropy.coordinates import AltAz, EarthLocation, get_sun, SkyCoord
 from astropy.time import Time
 import astropy.units as u
 import numpy as np
@@ -89,18 +89,16 @@ class DomeDaemon:
             if Time.now() > start + timeout_seconds * u.s:
                 return False
 
-    def _tracking_azimuth(self, time):
+    def _offset_azimuth(self, azimuth):
         """
-        Evaluates the dome azimuth required to track the target coordinates
-        at a given time. Corrects for the fact that the telescope dec axis
-        is not in the middle of the dome.
+        Evaluates the dome azimuth required to center a given telescope
+        azimuth in the slit. Corrects for the fact that the telescope
+        dec axis is not in the middle of the dome.
         """
-        frame = AltAz(obstime=time, location=self._location)
-        az = self._tracking_coord.transform_to(frame).az.to_value(u.deg)
 
         # Decompose the requested az into x (south) and y (east) coords
-        x = self._config.dome_radius_cm * np.cos(np.radians(az))
-        y = self._config.dome_radius_cm * np.sin(np.radians(az))
+        x = self._config.dome_radius_cm * np.cos(np.radians(azimuth))
+        y = self._config.dome_radius_cm * np.sin(np.radians(azimuth))
 
         # Find the vector from the telescope to the radius of the dome
         delta_x = x - self._config.telescope_offset_x_cm
@@ -111,6 +109,16 @@ class DomeDaemon:
             corrected_az += 360
 
         return corrected_az
+
+    def _tracking_azimuth(self, time):
+        """
+        Evaluates the dome azimuth required to track
+        a given ra,dec coordinate at a given time.
+        """
+        frame = AltAz(obstime=time, location=self._location)
+        azimuth = self._tracking_coord.transform_to(frame).az.to_value(u.deg)
+        return self._offset_azimuth(azimuth)
+
 
     def _open_connection(self):
         """
@@ -513,6 +521,22 @@ class DomeDaemon:
             return CommandStatus.Failed
 
         return CommandStatus.Succeeded
+
+    @Pyro4.expose
+    def slew_named(self, position):
+        """Slew the dome to the requested position"""
+        if not pyro_client_matches(self._config.control_ips):
+            return CommandStatus.InvalidControlIP
+
+        if position == 'antisolar':
+            frame = AltAz(obstime=Time.now(), location=self._location)
+            azimuth = (get_sun(Time.now()).transform_to(frame).az + 180 * u.deg).to_value(u.deg)
+            return self.slew_azimuth(azimuth)
+
+        if position == 'park':
+            return self.slew_azimuth(110)
+
+        return CommandStatus.Failed
 
     @Pyro4.expose
     def slew_azimuth(self, azimuth):
