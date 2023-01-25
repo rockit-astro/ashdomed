@@ -533,7 +533,7 @@ class DomeDaemon:
             return self.slew_azimuth(self._offset_azimuth(75, azimuth))
 
         if position == 'park':
-            return self.slew_azimuth(110)
+            return self.slew_azimuth(self._config.park_azimuth)
 
         return CommandStatus.Failed
 

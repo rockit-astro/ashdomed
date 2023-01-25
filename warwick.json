@@ -12,6 +12,7 @@
   "dome_radius_cm": 221,
   "telescope_offset_x_cm": -20,
   "home_azimuth": 110,
+  "park_azimuth": 140,
   "tracking_max_separation": 2,
   "idle_loop_delay": 10,
   "moving_loop_delay": 1,

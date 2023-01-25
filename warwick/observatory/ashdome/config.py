@@ -27,7 +27,7 @@ CONFIG_SCHEMA = {
     'required': [
         'daemon', 'log_name', 'control_machines', 'serial_port', 'serial_baud', 'serial_timeout',
         'latitude', 'longitude', 'altitude', 'steps_per_rotation', 'dome_radius_cm', 'telescope_offset_x_cm',
-        'home_azimuth', 'tracking_max_separation', 'idle_loop_delay', 'moving_loop_delay',
+        'home_azimuth', 'park_azimuth', 'tracking_max_separation', 'idle_loop_delay', 'moving_loop_delay',
         'azimuth_move_timeout', 'shutter_move_timeout'
     ],
     'properties': {
@@ -86,6 +86,10 @@ CONFIG_SCHEMA = {
             'type': 'number',
             'minimum': 0
         },
+        'park_azimuth': {
+            'type': 'number',
+            'minimum': 0
+        },
         'tracking_max_separation': {
             'type': 'number',
             'minimum': 0
@@ -133,6 +137,7 @@ class Config:
         self.dome_radius_cm = config_json['dome_radius_cm']
         self.telescope_offset_x_cm = config_json['telescope_offset_x_cm']
         self.home_azimuth = config_json['home_azimuth']
+        self.park_azimuth = config_json['park_azimuth']
         self.tracking_max_separation = config_json['tracking_max_separation']
         self.idle_loop_delay = int(config_json['idle_loop_delay'])
         self.moving_loop_delay = int(config_json['moving_loop_delay'])
