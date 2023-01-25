@@ -527,7 +527,7 @@ class DomeDaemon:
         if not pyro_client_matches(self._config.control_ips):
             return CommandStatus.InvalidControlIP
 
-        if position == 'antisolar':
+        if position == 'skyflat':
             frame = AltAz(obstime=Time.now(), location=self._location)
             azimuth = (get_sun(Time.now()).transform_to(frame).az + 180 * u.deg).to_value(u.deg)
             return self.slew_azimuth(self._offset_azimuth(75, azimuth))
