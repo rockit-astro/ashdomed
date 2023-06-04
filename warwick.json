@@ -5,6 +5,7 @@
   "serial_port": "/dev/dome",
   "serial_baud": 9600,
   "serial_timeout": 3,
+  "serial_retries": 5,
   "latitude": 52.376861,
   "longitude": -1.583861,
   "altitude": 94,

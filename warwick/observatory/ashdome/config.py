@@ -25,7 +25,7 @@ CONFIG_SCHEMA = {
     'type': 'object',
     'additionalProperties': False,
     'required': [
-        'daemon', 'log_name', 'control_machines', 'serial_port', 'serial_baud', 'serial_timeout',
+        'daemon', 'log_name', 'control_machines', 'serial_port', 'serial_baud', 'serial_timeout', 'serial_retries',
         'latitude', 'longitude', 'altitude', 'steps_per_rotation', 'dome_radius_cm', 'telescope_offset_x_cm',
         'home_azimuth', 'park_azimuth', 'tracking_max_separation', 'idle_loop_delay', 'moving_loop_delay',
         'azimuth_move_timeout', 'shutter_move_timeout'
@@ -53,6 +53,10 @@ CONFIG_SCHEMA = {
             'minimum': 0
         },
         'serial_timeout': {
+            'type': 'number',
+            'minimum': 0
+        },
+        'serial_retries': {
             'type': 'number',
             'minimum': 0
         },
@@ -133,6 +137,7 @@ class Config:
         self.serial_port = config_json['serial_port']
         self.serial_baud = config_json['serial_baud']
         self.serial_timeout = config_json['serial_timeout']
+        self.serial_retries = config_json['serial_retries']
         self.steps_per_rotation = config_json['steps_per_rotation']
         self.dome_radius_cm = config_json['dome_radius_cm']
         self.telescope_offset_x_cm = config_json['telescope_offset_x_cm']

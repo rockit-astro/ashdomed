@@ -186,29 +186,42 @@ class DomeDaemon:
         Optionally returns the motor response if has_response is True.
         Throws exceptions on error.
         """
-        if self._port.write(('\n' + command + '\n').encode('ascii')) != len(command) + 2:
-            raise serial.SerialException('Failed to send command')
+        for retry in range(self._config.serial_retries):
+            if retry > 0:
+                print(f'retrying command (attempt {retry})')
+                self._port.reset_output_buffer()
+                time.sleep(1)
+                self._port.reset_input_buffer()
 
-        echo = self._port.readline().decode('ascii').strip()
-        if echo != command:
-            cb = command.encode('ascii').hex()
-            eb = echo.encode('ascii').hex()
-            raise serial.SerialException(f'echo mismatch `{command}` != `{echo}`; {cb} != {eb}')
+            try:
+                if self._port.write(('\n' + command + '\n').encode('ascii')) != len(command) + 2:
+                    print(f'error: failed to send command: {command}')
+                    continue
 
-        if has_response:
-            response = self._port.readline().decode('ascii').strip()
-            #print(f'{command}: {response}')
-        else:
-            #print(f'{command}')
-            response = None
+                echo = self._port.readline().decode('ascii').strip()
+                if echo != command:
+                    cb = command.encode('ascii').hex()
+                    eb = echo.encode('ascii').hex()
+                    print(f'error: echo mismatch `{command}` != `{echo}`; {cb} != {eb}')
+                    continue
 
-        prompt = self._port.read(1).decode('ascii')
-        if ignore_error and prompt == '?':
-            self.send_command(f'{command[0]}ER 0')
-        elif prompt != '>':
-            raise serial.SerialException(f'prompt `{prompt}` is not `>`')
+                if has_response:
+                    response = self._port.readline().decode('ascii').strip()
+                else:
+                    response = None
 
-        return response
+                prompt = self._port.read(1).decode('ascii')
+                if ignore_error and prompt == '?':
+                    self.send_command(f'{command[0]}ER 0')
+                elif prompt != '>':
+                    print(f'error: prompt `{prompt}` is not `>`')
+                    continue
+
+                return response
+            except Exception as e:
+                print(f'error: exception `{e.msg}`')
+
+        raise serial.SerialException(f'Command `{command}` failed after {self._config.serial_retries} attempts')
 
     def _update_state(self):
         """Request and parse the status of the dome motors"""
