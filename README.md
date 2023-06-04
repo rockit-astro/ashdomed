@@ -40,11 +40,10 @@ To install and configure on a Raspberry Pi running Raspberry Pi OS 11 (bullseye)
 1. Set static IP by editing `/etc/dhcpcd.conf` to contain:
    ```
    interface eth0
-   static ip_address=X.X.X.X
-   static routers=X.X.X.X
-   static domain_name_servers=X.X.X.X 8.8.8.8
+   static ip_address=172.19.0.161
+   static routers=172.19.0.129
+   static domain_name_servers=137.205.205.80 137.205.205.100 137.205.205.129
    ```
-   TODO: Set static IP configuration.
    
    If the static IP changes it must also be updated in [`warwick-observatory-common`](https://github.com/warwick-one-metre/warwick-observatory-common).
 2. Install dependencies:
@@ -55,22 +54,13 @@ To install and configure on a Raspberry Pi running Raspberry Pi OS 11 (bullseye)
    ```
    git clone https://github.com/warwick-one-metre/warwick-observatory-common
    cd warwick-observatory-common
-   sudo python3 setup.py install
+   sudo make install
    ```
-4. Clone `ashdomed` and install the python package:
+4. Clone `ashdomed` and install:
    ```
    git clone https://github.com/warwick-one-metre/ashdomed
    cd ashdomed
-   sudo python3 setup.py install
-   ```
-5. Manually install the daemon and commandline utility:
-   ```
-   sudo cp ashdomed@.service /etc/systemd/system/
-   sudo cp ashdomed dome /usr/bin/
-   sudo cp 10-warwick-dome.rules /usr/lib/udev/rules.d/
-   sudo mkdir /etc/domed/
-   sudo cp warwick.json /etc/domed/
-   sudo cp completion/dome /etc/bash_completion.d/
+   sudo make install
    ```
 6. Enable the systemd service:
    ```
