@@ -301,7 +301,8 @@ class DomeDaemon:
             if self._heartbeat_status == HeartbeatStatus.TrippedIdle:
                 return CommandStatus.HeartbeatTimedOut
 
-            if self._shutter_status in [ShutterStatus.Opening, ShutterStatus.Closing]:
+            # `data` is used as an override boolean
+            if self._shutter_status in [ShutterStatus.Opening, ShutterStatus.Closing] and not data:
                 return CommandStatus.Blocked
 
         if request in ['home_azimuth', 'slew_azimuth', 'engineering_mode'] and \
@@ -449,7 +450,7 @@ class DomeDaemon:
                     delay = 1
 
     @Pyro4.expose
-    def open_shutter(self):
+    def open_shutter(self, blocking=True, override=False):
         """
         Open the dome shutter
         :return: CommandStatus indicating success or error code
@@ -458,19 +459,23 @@ class DomeDaemon:
             return CommandStatus.InvalidControlIP
 
         with self._comm_lock:
-            self._command_queue.put(('open_shutter', None))
+            self._command_queue.put(('open_shutter', override))
             result = self._result_queue.get()
 
         if result != CommandStatus.Succeeded:
             return result
 
-        if not self._wait_until(lambda: self._shutter_status == ShutterStatus.Open, self._config.shutter_move_timeout):
-            return CommandStatus.Failed
+        if blocking:
+            if not self._wait_until(lambda: self._shutter_status != ShutterStatus.Opening, self._config.shutter_move_timeout):
+                return CommandStatus.Failed
+
+            if self._shutter_status != ShutterStatus.Open:
+                return CommandStatus.Failed
 
         return CommandStatus.Succeeded
 
     @Pyro4.expose
-    def close_shutter(self):
+    def close_shutter(self, blocking=True, override=False):
         """
         Close the dome shutter
         :return: CommandStatus indicating success or error code
@@ -479,15 +484,19 @@ class DomeDaemon:
             return CommandStatus.InvalidControlIP
 
         with self._comm_lock:
-            self._command_queue.put(('close_shutter', None))
+            self._command_queue.put(('close_shutter', override))
             result = self._result_queue.get()
 
         if result != CommandStatus.Succeeded:
             return result
 
-        if not self._wait_until(lambda: self._shutter_status == ShutterStatus.Closed,
-                                self._config.shutter_move_timeout):
-            return CommandStatus.Failed
+        if blocking:
+            if not self._wait_until(lambda: self._shutter_status != ShutterStatus.Closing,
+                                    self._config.shutter_move_timeout):
+                return CommandStatus.Failed
+
+            if self._shutter_status != ShutterStatus.Closed:
+                return CommandStatus.Failed
 
         return CommandStatus.Succeeded
 
@@ -516,7 +525,7 @@ class DomeDaemon:
             return self._result_queue.get()
 
     @Pyro4.expose
-    def home_azimuth(self):
+    def home_azimuth(self, blocking=True):
         """Home the azimuth motor"""
         if not pyro_client_matches(self._config.control_ips):
             return CommandStatus.InvalidControlIP
@@ -529,13 +538,14 @@ class DomeDaemon:
         if result != CommandStatus.Succeeded:
             return result
 
-        if not self._wait_until(lambda: self._azimuth_status == AzimuthStatus.Idle, self._config.azimuth_move_timeout):
-            return CommandStatus.Failed
+        if blocking:
+            if not self._wait_until(lambda: self._azimuth_status == AzimuthStatus.Idle, self._config.azimuth_move_timeout):
+                return CommandStatus.Failed
 
         return CommandStatus.Succeeded
 
     @Pyro4.expose
-    def slew_named(self, position):
+    def slew_named(self, position, blocking=True):
         """Slew the dome to the requested position"""
         if not pyro_client_matches(self._config.control_ips):
             return CommandStatus.InvalidControlIP
@@ -543,15 +553,15 @@ class DomeDaemon:
         if position == 'skyflat':
             frame = AltAz(obstime=Time.now(), location=self._location)
             azimuth = (get_sun(Time.now()).transform_to(frame).az + 180 * u.deg).to_value(u.deg)
-            return self.slew_azimuth(self._offset_azimuth(75, azimuth))
+            return self.slew_azimuth(self._offset_azimuth(75, azimuth), blocking=blocking)
 
         if position == 'park':
-            return self.slew_azimuth(self._config.park_azimuth)
+            return self.slew_azimuth(self._config.park_azimuth, blocking=blocking)
 
         return CommandStatus.Failed
 
     @Pyro4.expose
-    def slew_azimuth(self, azimuth):
+    def slew_azimuth(self, azimuth, blocking=True):
         """Slew the dome to the requested azimuth"""
         if not pyro_client_matches(self._config.control_ips):
             return CommandStatus.InvalidControlIP
@@ -564,8 +574,10 @@ class DomeDaemon:
         if result != CommandStatus.Succeeded:
             return result
 
-        if not self._wait_until(lambda: self._azimuth_status == AzimuthStatus.Idle, self._config.azimuth_move_timeout):
-            return CommandStatus.Failed
+        if blocking:
+            if not self._wait_until(lambda: self._azimuth_status == AzimuthStatus.Idle,
+                                    self._config.azimuth_move_timeout):
+                return CommandStatus.Failed
 
         return CommandStatus.Succeeded
 
