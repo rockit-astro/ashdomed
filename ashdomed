@@ -219,7 +219,7 @@ class DomeDaemon:
 
                 return response
             except Exception as e:
-                print(f'error: exception `{e.msg}`')
+                print(f'error: exception `{e}`')
 
         raise serial.SerialException(f'Command `{command}` failed after {self._config.serial_retries} attempts')
 
