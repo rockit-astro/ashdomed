@@ -50,8 +50,8 @@ class DomeDaemon:
 
         self._state_lock = threading.RLock()
         self._state_date = None
-        self._azimuth_status = AzimuthStatus.NotHomed
-        self._shutter_status = ShutterStatus.Closed
+        self._azimuth_status = AzimuthStatus.Disconnected
+        self._shutter_status = ShutterStatus.Disconnected
         self._azimuth = 0
 
         self._heartbeat_status = HeartbeatStatus.Disabled
@@ -145,6 +145,8 @@ class DomeDaemon:
 
             with self._state_lock:
                 self._port = port
+                self._heartbeat_status = HeartbeatStatus.Disabled
+                self._azimuth_status = AzimuthStatus.NotHomed
 
                 # Refresh state before considering the connection valid
                 self._update_state()
