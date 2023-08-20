@@ -4,9 +4,7 @@
 
 `dome` is a commandline utility that interfaces with the dome daemon.
 
-`python3-warwick-observatory-ashdome` is a python module with the common dome code.
-
-See [Software Infrastructure](https://github.com/warwick-one-metre/docs/wiki/Software-Infrastructure) for an overview of the software architecture and instructions for developing and deploying the code.
+`python3-rockit-ashdome` is a python module with the common dome code.
 
 ### Configuration
 
@@ -15,9 +13,9 @@ A configuration file is specified when launching the dome server, and the `dome`
 
 ```python
 {
-  "daemon": "warwick_dome", # Run the server as this daemon. Daemon types are registered in `warwick.observatory.common.daemons`.
+  "daemon": "warwick_dome", # Run the server as this daemon. Daemon types are registered in `rockit.common.daemons`.
   "log_name": "warwick_dome", # The name to use when writing messages to the observatory log.
-  "control_machines": ["WarwickDome", "WarwickTCS"], # Machine names that are allowed to control (rather than just query) state. Machine names are registered in `warwick.observatory.common.IP`.
+  "control_machines": ["WarwickDome", "WarwickTCS"], # Machine names that are allowed to control (rather than just query) state. Machine names are registered in `rockit.common.IP`.
   "serial_port": "/dev/dome", # Serial FIFO for communicating with the dome motors.
   "serial_baud": 9600, # Serial baud rate (always 9600).
   "serial_timeout": 3, # Serial communication timeout.
@@ -45,20 +43,20 @@ To install and configure on a Raspberry Pi running Raspberry Pi OS 11 (bullseye)
    static domain_name_servers=137.205.205.80 137.205.205.100 137.205.205.129
    ```
    
-   If the static IP changes it must also be updated in [`warwick-observatory-common`](https://github.com/warwick-one-metre/warwick-observatory-common).
+   If the static IP changes it must also be updated in [`rockit-common`](https://github.com/rockit-astro/rockit-common).
 2. Install dependencies:
    ```
    sudo apt install git python3-astropy python3-jsonschema python3-pyro4 python3-serial
    ```
-3. Clone and install the [`warwick-observatory-common`](https://github.com/warwick-one-metre/warwick-observatory-common) python package:
+3. Clone and install the [`rockit-common`](https://github.com/rockit-astro/rockit-common) python package:
    ```
-   git clone https://github.com/warwick-one-metre/warwick-observatory-common
-   cd warwick-observatory-common
+   git clone https://github.com/rockit-astro/rockit-common
+   cd rockit-common
    sudo make install
    ```
 4. Clone `ashdomed` and install:
    ```
-   git clone https://github.com/warwick-one-metre/ashdomed
+   git clone https://github.com/rockit-astro/ashdomed
    cd ashdomed
    sudo make install
    ```
