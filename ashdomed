@@ -323,9 +323,11 @@ class DomeDaemon:
                 self._heartbeat_status = HeartbeatStatus.TrippedClosing
         elif request == 'stop_azimuth':
             self.send_command('ASL 0')
+            self._tracking_coord = None
         elif request == 'home_azimuth':
             self.send_command('AHM 1')
             self._azimuth_status = AzimuthStatus.Homing
+            self._tracking_coord = None
         elif request == 'slew_azimuth':
             if self._azimuth_status == AzimuthStatus.NotHomed:
                 return CommandStatus.NotHomed
@@ -346,6 +348,10 @@ class DomeDaemon:
             steps = int((target - self._config.home_azimuth) / 360. * self._config.steps_per_rotation)
             self.send_command(f'AMA {steps}')
             self._azimuth_status = AzimuthStatus.Moving
+            self._tracking_coord = None
+        elif request == 'track_radec':
+            self._tracking_coord = SkyCoord(ra=data[0], dec=data[1], unit=u.deg, frame='icrs')
+            self.process_request('slew_azimuth', self._tracking_azimuth(Time.now()))
         elif request == 'heartbeat':
             if data == 0:
                 self._heartbeat_status = HeartbeatStatus.Disabled
@@ -522,7 +528,6 @@ class DomeDaemon:
             return CommandStatus.InvalidControlIP
 
         with self._comm_lock:
-            self._tracking_coord = None
             self._command_queue.put(('stop_azimuth', None))
             return self._result_queue.get()
 
@@ -533,7 +538,6 @@ class DomeDaemon:
             return CommandStatus.InvalidControlIP
 
         with self._comm_lock:
-            self._tracking_coord = None
             self._command_queue.put(('home_azimuth', None))
             result = self._result_queue.get()
 
@@ -569,7 +573,6 @@ class DomeDaemon:
             return CommandStatus.InvalidControlIP
 
         with self._comm_lock:
-            self._tracking_coord = None
             self._command_queue.put(('slew_azimuth', azimuth))
             result = self._result_queue.get()
 
@@ -584,26 +587,22 @@ class DomeDaemon:
         return CommandStatus.Succeeded
 
     @Pyro4.expose
-    def track_radec(self, ra_degrees, dec_degrees):
+    def track_radec(self, ra_degrees, dec_degrees, blocking=True):
         """Align the dome slit and begin tracking the given RA and Dec"""
         if not pyro_client_matches(self._config.control_ips):
             return CommandStatus.InvalidControlIP
 
-        coord = SkyCoord(ra=ra_degrees, dec=dec_degrees, unit=u.deg, frame='icrs')
         with self._comm_lock:
-            self._tracking_coord = None
-            azimuth = coord.transform_to(AltAz(obstime=Time.now(), location=self._location)).az.to_value(u.deg)
-            self._command_queue.put(('slew_azimuth', azimuth))
+            self._command_queue.put(('track_radec', (ra_degrees, dec_degrees)))
             result = self._result_queue.get()
 
         if result != CommandStatus.Succeeded:
             return result
 
-        if not self._wait_until(lambda: self._azimuth_status == AzimuthStatus.Idle, self._config.azimuth_move_timeout):
-            return CommandStatus.Failed
-
-        with self._comm_lock:
-            self._tracking_coord = coord
+        if blocking:
+            if not self._wait_until(lambda: self._azimuth_status == AzimuthStatus.Idle,
+                                    self._config.azimuth_move_timeout):
+                return CommandStatus.Failed
 
         return CommandStatus.Succeeded
 
@@ -614,7 +613,6 @@ class DomeDaemon:
             return CommandStatus.InvalidControlIP
 
         with self._comm_lock:
-            self._tracking_coord = None
             self._command_queue.put(('engineering_mode', enabled))
             return self._result_queue.get()
 
