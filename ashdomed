@@ -758,12 +758,10 @@ class DomeDaemon:
                 })
         return data
 
-    # pylint: disable=no-self-use
     @Pyro4.expose
     def ping(self):
         """Returns immediately with a success status"""
         return CommandStatus.Succeeded
-    # pylint: enable=no-self-use
 
 
 if __name__ == '__main__':
