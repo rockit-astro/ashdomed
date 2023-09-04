@@ -28,7 +28,7 @@ CONFIG_SCHEMA = {
         'daemon', 'log_name', 'control_machines', 'serial_port', 'serial_baud', 'serial_timeout', 'serial_retries',
         'latitude', 'longitude', 'altitude', 'steps_per_rotation', 'dome_radius_cm', 'telescope_offset_x_cm',
         'home_azimuth', 'park_azimuth', 'tracking_max_separation', 'idle_loop_delay', 'moving_loop_delay',
-        'azimuth_move_timeout', 'shutter_move_timeout'
+        'azimuth_move_timeout', 'shutter_move_timeout', 'telescope_machines'
     ],
     'properties': {
         'daemon': {
@@ -113,6 +113,13 @@ CONFIG_SCHEMA = {
         'shutter_move_timeout': {
             'type': 'number',
             'min': 0
+        },
+        'telescope_machines': {
+            'type': 'array',
+            'items': {
+                'type': 'string',
+                'machine_name': True
+            }
         }
     }
 }
@@ -134,6 +141,7 @@ class Config:
         self.daemon = getattr(daemons, config_json['daemon'])
         self.log_name = config_json['log_name']
         self.control_ips = [getattr(IP, machine) for machine in config_json['control_machines']]
+        self.telescope_ips = [getattr(IP, machine) for machine in config_json['telescope_machines']]
         self.serial_port = config_json['serial_port']
         self.serial_baud = config_json['serial_baud']
         self.serial_timeout = config_json['serial_timeout']

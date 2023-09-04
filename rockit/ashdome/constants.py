@@ -36,6 +36,7 @@ class CommandStatus:
     HeartbeatInvalidTimeout = 16
     EngineeringModeRequiresHeartbeatDisabled = 17
     EngineeringModeActive = 18
+    FollowModeActive = 19
 
     _messages = {
         # General error codes
@@ -52,6 +53,7 @@ class CommandStatus:
         16: 'error: heartbeat timeout must be less than 120s',
         17: 'error: heartbeat must be disabled before enabling engineering mode',
         18: 'error: dome is in engineering mode',
+        19: 'error: dome azimuth is controlled by the telescope',
 
         -100: 'error: terminated by user',
         -101: 'error: unable to communicate with dome daemon'

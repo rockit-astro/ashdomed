@@ -2,6 +2,7 @@
   "daemon": "warwick_dome",
   "log_name": "dome@warwick",
   "control_machines": ["WarwickDome", "WarwickTCS"],
+  "telescope_machines": ["WarwickTCS"],
   "serial_port": "/dev/dome",
   "serial_baud": 9600,
   "serial_timeout": 3,

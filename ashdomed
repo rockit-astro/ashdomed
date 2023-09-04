@@ -57,8 +57,8 @@ class DomeDaemon:
         self._heartbeat_status = HeartbeatStatus.Disabled
         self._heartbeat_expires = None
 
-        self._force_stopped = False
         self._engineering_mode = False
+        self._follow_telescope = False
 
         self._comm_lock = threading.Lock()
         self._command_queue = queue.Queue()
@@ -110,13 +110,13 @@ class DomeDaemon:
 
         return corrected_az
 
-    def _tracking_azimuth(self, time):
+    def _altaz_to_dome_azimuth(self, coord, time):
         """
         Evaluates the dome azimuth required to track
         a given ra,dec coordinate at a given time.
         """
         frame = AltAz(obstime=time, location=self._location)
-        altaz = self._tracking_coord.transform_to(frame)
+        altaz = coord.transform_to(frame)
         return self._offset_azimuth(altaz.alt.to_value(u.deg), altaz.az.to_value(u.deg))
 
     def _open_connection(self):
@@ -350,8 +350,14 @@ class DomeDaemon:
             self._azimuth_status = AzimuthStatus.Moving
             self._tracking_coord = None
         elif request == 'track_radec':
-            self._tracking_coord = SkyCoord(ra=data[0], dec=data[1], unit=u.deg, frame='icrs')
-            self.process_request('slew_azimuth', self._tracking_azimuth(Time.now()))
+            coord = SkyCoord(ra=data[0], dec=data[1], unit=u.deg, frame='icrs')
+            self.process_request('slew_azimuth', self._altaz_to_dome_azimuth(coord, Time.now()))
+            self._tracking_coord = coord
+        elif request == 'slew_radec':
+            coord = SkyCoord(ra=data[0], dec=data[1], unit=u.deg, frame='icrs')
+            self.process_request('slew_azimuth', self._altaz_to_dome_azimuth(coord, Time.now()))
+        elif request == 'slew_altaz':
+            self.process_request('slew_azimuth', self._offset_azimuth(data[0], data[1]))
         elif request == 'heartbeat':
             if data == 0:
                 self._heartbeat_status = HeartbeatStatus.Disabled
@@ -409,7 +415,7 @@ class DomeDaemon:
                 # Update tracking coordinate if needed
                 elif request is None and self._tracking_coord is not None and \
                         self._azimuth_status == AzimuthStatus.Idle:
-                    azimuth = self._tracking_azimuth(Time.now())
+                    azimuth = self._altaz_to_dome_azimuth(self._tracking_coord, Time.now())
                     delta = azimuth - self._azimuth
                     if delta < -180:
                         delta += 360
@@ -419,7 +425,7 @@ class DomeDaemon:
                     print(f'Tracking delta: {delta:.1f}')
                     if abs(delta) > self._config.tracking_max_separation:
                         # Check the direction of motion
-                        future_azimuth = self._tracking_azimuth(Time.now() + 1 * u.minute)
+                        future_azimuth = self._altaz_to_dome_azimuth(self._tracking_coord, Time.now() + 1 * u.minute)
                         direction = 1 if future_azimuth > azimuth or future_azimuth < azimuth - 180 else -1
 
                         target_azimuth = azimuth + direction * self._config.tracking_max_separation
@@ -527,6 +533,9 @@ class DomeDaemon:
         if not pyro_client_matches(self._config.control_ips):
             return CommandStatus.InvalidControlIP
 
+        if self._follow_telescope:
+            return CommandStatus.FollowModeActive
+
         with self._comm_lock:
             self._command_queue.put(('stop_azimuth', None))
             return self._result_queue.get()
@@ -536,6 +545,9 @@ class DomeDaemon:
         """Home the azimuth motor"""
         if not pyro_client_matches(self._config.control_ips):
             return CommandStatus.InvalidControlIP
+
+        if self._follow_telescope:
+            return CommandStatus.FollowModeActive
 
         with self._comm_lock:
             self._command_queue.put(('home_azimuth', None))
@@ -556,6 +568,9 @@ class DomeDaemon:
         if not pyro_client_matches(self._config.control_ips):
             return CommandStatus.InvalidControlIP
 
+        if self._follow_telescope:
+            return CommandStatus.FollowModeActive
+
         if position == 'skyflat':
             frame = AltAz(obstime=Time.now(), location=self._location)
             azimuth = (get_sun(Time.now()).transform_to(frame).az + 180 * u.deg).to_value(u.deg)
@@ -571,6 +586,9 @@ class DomeDaemon:
         """Slew the dome to the requested azimuth"""
         if not pyro_client_matches(self._config.control_ips):
             return CommandStatus.InvalidControlIP
+
+        if self._follow_telescope:
+            return CommandStatus.FollowModeActive
 
         with self._comm_lock:
             self._command_queue.put(('slew_azimuth', azimuth))
@@ -592,6 +610,9 @@ class DomeDaemon:
         if not pyro_client_matches(self._config.control_ips):
             return CommandStatus.InvalidControlIP
 
+        if self._follow_telescope:
+            return CommandStatus.FollowModeActive
+
         with self._comm_lock:
             self._command_queue.put(('track_radec', (ra_degrees, dec_degrees)))
             result = self._result_queue.get()
@@ -604,6 +625,61 @@ class DomeDaemon:
                                     self._config.azimuth_move_timeout):
                 return CommandStatus.Failed
 
+        return CommandStatus.Succeeded
+
+    @Pyro4.expose
+    def notify_telescope_radec(self, ra_degrees, dec_degrees, tracking):
+        """Notification that the telescope is moving to a new location"""
+        if not pyro_client_matches(self._config.telescope_ips):
+            return CommandStatus.InvalidControlIP
+
+        if not self._follow_telescope:
+            return CommandStatus.Succeeded
+
+        with self._comm_lock:
+            command = 'track_radec' if tracking else 'slew_radec'
+            self._command_queue.put((command, (ra_degrees, dec_degrees)))
+            return self._result_queue.get()
+
+    @Pyro4.expose
+    def notify_telescope_altaz(self, alt_degrees, az_degrees):
+        """Notification that the telescope is moving to a new location"""
+        if not pyro_client_matches(self._config.telescope_ips):
+            return CommandStatus.InvalidControlIP
+
+        if not self._follow_telescope:
+            return CommandStatus.Succeeded
+
+        with self._comm_lock:
+            self._command_queue.put(('slew_altaz', (alt_degrees, az_degrees)))
+            return self._result_queue.get()
+
+    @Pyro4.expose
+    def notify_telescope_stopped(self):
+        """Notification that the telescope stopped tracking"""
+        if not pyro_client_matches(self._config.telescope_ips):
+            return CommandStatus.InvalidControlIP
+
+        if not self._follow_telescope:
+            return CommandStatus.Succeeded
+
+        with self._comm_lock:
+            self._command_queue.put(('stop_azimuth', None))
+            return self._result_queue.get()
+
+    @Pyro4.expose
+    def set_follow_mode(self, enabled):
+        """Enable engineering mode (all movement commands disabled)"""
+        if not pyro_client_matches(self._config.control_ips):
+            return CommandStatus.InvalidControlIP
+
+        if self._port is None:
+            return CommandStatus.NotConnected
+
+        if self._engineering_mode:
+            return CommandStatus.EngineeringModeActive
+
+        self._follow_telescope = enabled
         return CommandStatus.Succeeded
 
     @Pyro4.expose

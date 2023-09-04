@@ -201,6 +201,20 @@ def engineering_mode(config, args):
     return -1
 
 
+def follow_mode(config, args):
+    """Enable or disable telescope azimuth control"""
+    if args:
+        with config.daemon.connect() as dome:
+            if args[0] == 'disable':
+                return dome.set_follow_mode(False)
+
+            if args[0] == 'enable':
+                return dome.set_follow_mode(True)
+
+    print(f'usage: {SCRIPT_NAME} follow (disable|enable)')
+    return -1
+
+
 def heartbeat(config, args):
     """Configure the dome close heartbeat"""
     if args:
@@ -249,6 +263,7 @@ def print_usage():
     print('   slew          slew to the given azimuth')
     print('   track         track the given RA and Dec')
     print('   home          home the dome azimuth')
+    print('   follow        allow dome to automatically follow the telescope')
     print('   engineering   enable or disable engineering mode')
     print('   init          connect to the dome')
     print('   kill          disconnect from the dome')
@@ -266,6 +281,7 @@ if __name__ == '__main__':
         'slew': slew,
         'track': track,
         'home': home,
+        'follow': follow_mode,
         'engineering': engineering_mode,
         'heartbeat': heartbeat,
         'init': initialize,

@@ -10,7 +10,7 @@ _dome()
         heartbeat)
             opts="disable"
             ;;
-        engineering)
+        engineering|follow)
             opts="enable disable"
             ;;
     esac
