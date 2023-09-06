@@ -558,23 +558,15 @@ class DomeDaemon:
         return CommandStatus.Succeeded
 
     @Pyro4.expose
-    def slew_named(self, position, blocking=True):
-        """Slew the dome to the requested position"""
+    def park(self, blocking=True):
+        """Slew the dome to the park position"""
         if not pyro_client_matches(self._config.control_ips):
             return CommandStatus.InvalidControlIP
 
         if self._follow_telescope:
             return CommandStatus.FollowModeActive
 
-        if position == 'skyflat':
-            frame = AltAz(obstime=Time.now(), location=self._location)
-            azimuth = (get_sun(Time.now()).transform_to(frame).az + 180 * u.deg).to_value(u.deg)
-            return self.slew_azimuth(self._offset_azimuth(75, azimuth), blocking=blocking)
-
-        if position == 'park':
-            return self.slew_azimuth(self._config.park_azimuth, blocking=blocking)
-
-        return CommandStatus.Failed
+        return self.slew_azimuth(self._config.park_azimuth, blocking=blocking)
 
     @Pyro4.expose
     def slew_azimuth(self, azimuth, blocking=True):
@@ -660,6 +652,19 @@ class DomeDaemon:
 
         with self._comm_lock:
             self._command_queue.put(('stop_azimuth', None))
+            return self._result_queue.get()
+
+    @Pyro4.expose
+    def notify_telescope_parked(self):
+        """Notification that the telescope is moving to a park position"""
+        if not pyro_client_matches(self._config.telescope_ips):
+            return CommandStatus.InvalidControlIP
+
+        if not self._follow_telescope:
+            return CommandStatus.Succeeded
+
+        with self._comm_lock:
+            self._command_queue.put(('slew_azimuth', self._config.park_azimuth))
             return self._result_queue.get()
 
     @Pyro4.expose
