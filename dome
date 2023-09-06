@@ -82,7 +82,7 @@ def print_status(config, _):
     date = datetime.datetime.strptime(status['date'], '%Y-%m-%dT%H:%M:%SZ')
     print(f'Dome status at: {TFmt.Bold}{date}{TFmt.Clear}:')
     if status['azimuth_status'] in [AzimuthStatus.Idle, AzimuthStatus.Moving]:
-        azimuth_label = f'  Azimuth: {TFmt.Bold}{status["azimuth"]:.1f}\u00B0{TFmt.Clear}'
+        azimuth_label = f'    Azimuth: {TFmt.Bold}{status["azimuth"]:.1f}\u00B0{TFmt.Clear}'
         if status['azimuth_status'] == AzimuthStatus.Moving:
             azimuth_label += f' ({AzimuthStatus.label(status["azimuth_status"], formatting=True)})'
         elif 'tracking_ra' in status:
@@ -92,16 +92,20 @@ def print_status(config, _):
             azimuth_label += f' ({TFmt.Bold + TFmt.Green}TRACKING {TFmt.Clear}' +\
                              f'{TFmt.Bold}{ra_desc} {dec_desc}{TFmt.Clear})'
     else:
-        azimuth_label = f'  Azimuth: {AzimuthStatus.label(status["azimuth_status"], formatting=True)}'
+        azimuth_label = f'    Azimuth: {AzimuthStatus.label(status["azimuth_status"], formatting=True)}'
 
     print(azimuth_label)
 
-    print(f'  Shutter: {ShutterStatus.label(status["shutter"], formatting=True)}')
+    print(f'    Shutter: {ShutterStatus.label(status["shutter"], formatting=True)}')
+
+    if 'follow_telescope' in status:
+        print(f'Az. control: {TFmt.Bold}' +
+              (f'{TFmt.Green}AUTOMATIC' if status['follow_telescope'] else f'{TFmt.Yellow}MANUAL') + TFmt.Clear)
 
     eng_mode = TFmt.Red + 'ENABLED' if status['engineering_mode'] else TFmt.Green + 'DISABLED'
-    print(f'Eng. mode: {TFmt.Bold}{eng_mode}{TFmt.Clear}')
+    print(f'  Eng. mode: {TFmt.Bold}{eng_mode}{TFmt.Clear}')
     if 'heartbeat_status' in status:
-        print(f'Heartbeat: {HeartbeatStatus.label(status["heartbeat_status"], formatting=True)}')
+        print(f'  Heartbeat: {HeartbeatStatus.label(status["heartbeat_status"], formatting=True)}')
         if status['heartbeat_status'] == HeartbeatStatus.Active:
             print(f'Time remaining: {TFmt.Bold}{status["heartbeat_remaining"]:.1f}{TFmt.Clear}')
     return 0

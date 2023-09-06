@@ -54,7 +54,7 @@ class DomeDaemon:
         self._heartbeat_expires = None
 
         self._engineering_mode = False
-        self._follow_telescope = False
+        self._follow_telescope = True
 
         self._comm_lock = threading.Lock()
         self._command_queue = queue.Queue()
@@ -143,6 +143,7 @@ class DomeDaemon:
                 self._port = port
                 self._heartbeat_status = HeartbeatStatus.Disabled
                 self._azimuth_status = AzimuthStatus.NotHomed
+                self._follow_telescope = True
 
                 # Refresh state before considering the connection valid
                 self._update_state()
@@ -321,9 +322,10 @@ class DomeDaemon:
             self.send_command('ASL 0')
             self._tracking_coord = None
         elif request == 'home_azimuth':
-            self.send_command('AHM 1')
-            self._azimuth_status = AzimuthStatus.Homing
-            self._tracking_coord = None
+            if self._azimuth_status == AzimuthStatus.NotHomed:
+                self.send_command('AHM 1')
+                self._azimuth_status = AzimuthStatus.Homing
+                self._tracking_coord = None
         elif request == 'slew_azimuth':
             if self._azimuth_status == AzimuthStatus.NotHomed:
                 return CommandStatus.NotHomed
@@ -542,9 +544,6 @@ class DomeDaemon:
         if not pyro_client_matches(self._config.control_ips):
             return CommandStatus.InvalidControlIP
 
-        if self._follow_telescope:
-            return CommandStatus.FollowModeActive
-
         with self._comm_lock:
             self._command_queue.put(('home_azimuth', None))
             result = self._result_queue.get()
@@ -739,6 +738,7 @@ class DomeDaemon:
                 'azimuth': self._azimuth % 360,
                 'azimuth_status': self._azimuth_status,
                 'azimuth_status_label': AzimuthStatus.label(self._azimuth_status),
+                'follow_telescope': self._follow_telescope,
                 'shutter': self._shutter_status,
                 'shutter_label': ShutterStatus.label(self._shutter_status),
                 'closed': self._shutter_status == ShutterStatus.Closed,
