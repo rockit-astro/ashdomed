@@ -403,12 +403,18 @@ class DomeDaemon:
             was_moving = self._shutter_status in [ShutterStatus.Opening, ShutterStatus.Closing] \
                 or self._azimuth_status in [AzimuthStatus.Homing, AzimuthStatus.Moving]
 
+            was_homing = self._azimuth_status == AzimuthStatus.Homing
+
             try:
                 self._update_state()
 
                 # Update heartbeat if needed
                 if self._heartbeat_status == HeartbeatStatus.Active and Time.now() > self._heartbeat_expires:
                     self.process_request('heartbeat_expired', None)
+
+                # Slew to park position after homing
+                elif was_homing and self._azimuth_status == AzimuthStatus.Idle:
+                    self.process_request('slew_azimuth', self._config.park_azimuth)
 
                 # Update tracking coordinate if needed
                 elif request is None and self._tracking_coord is not None and \
