@@ -4,7 +4,7 @@ _dome()
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    opts="status open close stop heartbeat slew track engineering"
+    opts="status open close stop heartbeat slew track engineering init kill"
 
     case "${prev}" in
         heartbeat)
