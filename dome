@@ -25,14 +25,7 @@ from astropy.coordinates import SkyCoord
 import astropy.units as u
 import Pyro4
 from rockit.ashdome import Config, CommandStatus, AzimuthStatus, ShutterStatus, HeartbeatStatus
-from rockit.common import TFmt
-
-# Fix terminal coloring on Windows clients
-try:
-    import colorama
-    colorama.init()
-except ImportError:
-    pass
+from rockit.common import print
 
 SCRIPT_NAME = os.path.basename(sys.argv[0])
 sys.excepthook = Pyro4.util.excepthook
@@ -80,17 +73,16 @@ def print_status(config, _):
         status = dome.status()
 
     date = datetime.datetime.strptime(status['date'], '%Y-%m-%dT%H:%M:%SZ')
-    print(f'Dome status at: {TFmt.Bold}{date}{TFmt.Clear}:')
+    print(f'Dome status at: [b]{date}[/b]:')
     if status['azimuth_status'] in [AzimuthStatus.Idle, AzimuthStatus.Moving]:
-        azimuth_label = f'    Azimuth: {TFmt.Bold}{status["azimuth"]:.1f}\u00B0{TFmt.Clear}'
+        azimuth_label = f'    Azimuth: [b]{status["azimuth"]:.1f}\u00B0[/b]'
         if status['azimuth_status'] == AzimuthStatus.Moving:
             azimuth_label += f' ({AzimuthStatus.label(status["azimuth_status"], formatting=True)})'
         elif 'tracking_ra' in status:
             coords = SkyCoord(ra=status['tracking_ra'], dec=status['tracking_dec'], unit=u.deg)
             ra_desc = coords.ra.to(u.hourangle).to_string(sep=':', precision=0)
             dec_desc = coords.dec.to(u.deg).to_string(sep=':', precision=0)
-            azimuth_label += f' ({TFmt.Bold + TFmt.Green}TRACKING {TFmt.Clear}' +\
-                             f'{TFmt.Bold}{ra_desc} {dec_desc}{TFmt.Clear})'
+            azimuth_label += f' ([b][green]TRACKING[/green] {ra_desc} {dec_desc}[/b])'
     else:
         azimuth_label = f'    Azimuth: {AzimuthStatus.label(status["azimuth_status"], formatting=True)}'
 
@@ -99,15 +91,15 @@ def print_status(config, _):
     print(f'    Shutter: {ShutterStatus.label(status["shutter"], formatting=True)}')
 
     if 'follow_telescope' in status:
-        print(f'Az. control: {TFmt.Bold}' +
-              (f'{TFmt.Green}AUTOMATIC' if status['follow_telescope'] else f'{TFmt.Yellow}MANUAL') + TFmt.Clear)
+        follow = '[green]AUTOMATIC[/green]' if status['follow_telescope'] else '[yellow]MANUAL[/yellow]'
+        print(f'Az. control: [b]{follow}[/b]')
 
-    eng_mode = TFmt.Red + 'ENABLED' if status['engineering_mode'] else TFmt.Green + 'DISABLED'
-    print(f'  Eng. mode: {TFmt.Bold}{eng_mode}{TFmt.Clear}')
+    eng_mode = '[red]ENABLED[/red]' if status['engineering_mode'] else '[green]DISABLED[/green]'
+    print(f'  Eng. mode: [b]{eng_mode}[/b]')
     if 'heartbeat_status' in status:
         print(f'  Heartbeat: {HeartbeatStatus.label(status["heartbeat_status"], formatting=True)}')
         if status['heartbeat_status'] == HeartbeatStatus.Active:
-            print(f'Time remaining: {TFmt.Bold}{status["heartbeat_remaining"]:.1f}{TFmt.Clear}')
+            print(f'Time remaining: [b]{status["heartbeat_remaining"]:.1f}[/b]')
     return 0
 
 
