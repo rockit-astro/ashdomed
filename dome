@@ -195,7 +195,7 @@ def engineering_mode(config, args):
             if args[0] == 'enable':
                 return dome.set_engineering_mode(True)
 
-    print(f'usage: {SCRIPT_NAME} engineering (disable|enable)')
+    print(f'usage: {SCRIPT_NAME} engineering <disable|enable>')
     return -1
 
 
@@ -209,7 +209,7 @@ def follow_mode(config, args):
             if args[0] == 'enable':
                 return dome.set_follow_mode(True)
 
-    print(f'usage: {SCRIPT_NAME} follow (disable|enable)')
+    print(f'usage: {SCRIPT_NAME} follow <disable|enable>')
     return -1
 
 
@@ -227,7 +227,7 @@ def heartbeat(config, args):
                         return dome.set_heartbeat_timer(timeout)
             print(f'usage: {SCRIPT_NAME} heartbeat enable <timeout in seconds>')
             return -1
-    print(f'usage: {SCRIPT_NAME} heartbeat (disable|enable)')
+    print(f'usage: {SCRIPT_NAME} heartbeat <disable|enable>')
     return -1
 
 
