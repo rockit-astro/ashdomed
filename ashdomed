@@ -179,44 +179,54 @@ class DomeDaemon:
                 self._port = None
                 return CommandStatus.Failed
 
-    def send_command(self, command, has_response=False, ignore_error=False):
+    def send_command(self, command, has_response=False):
         """
         Sends a motor control command and validates that it was processed correctly.
         Optionally returns the motor response if has_response is True.
         Throws exceptions on error.
         """
+        def checksum(data):
+            return ((~(sum(data) & 0x7F) + 1) | 128).to_bytes(1, 'big', signed=True)
+
+        # Ensure the motors have finished processing the previous command
+        time.sleep(0.1)
+
         for retry in range(self._config.serial_retries):
             if retry > 0:
                 print(f'retrying command (attempt {retry})')
-                self._port.reset_output_buffer()
                 time.sleep(1)
-                self._port.reset_input_buffer()
+
+            self._port.reset_output_buffer()
+            self._port.reset_input_buffer()
 
             try:
-                if self._port.write(('\n' + command + '\n').encode('ascii')) != len(command) + 2:
+                command_bytes = command.encode('ascii')
+                checksum_bytes = checksum(command_bytes)
+                if self._port.write(b'\n' + command_bytes + checksum_bytes + b'\n') != len(command) + 3:
                     print(f'error: failed to send command: {command}')
                     continue
 
-                echo = self._port.readline().decode('ascii').strip()
-                if echo != command:
-                    cb = command.encode('ascii').hex()
-                    eb = echo.encode('ascii').hex()
-                    print(f'error: echo mismatch `{command}` != `{echo}`; {cb} != {eb}')
+                # Read command response (ACK or NAK)
+                response = self._port.read(1)
+                if response != b'\x06':
+                    print(f'error: motor responded to command: {command} with: {response}')
                     continue
 
                 if has_response:
-                    response = self._port.readline().decode('ascii').strip()
-                else:
-                    response = None
+                    # Read the reported value
+                    value = self._port.readline()
+                    if not value:
+                        print(f'error: motor did not return value for command: {command}')
+                        continue
 
-                prompt = self._port.read(1).decode('ascii')
-                if ignore_error and prompt == '?':
-                    self.send_command(f'{command[0]}ER 0')
-                elif prompt != '>':
-                    print(f'error: prompt `{prompt}` is not `>`')
-                    continue
+                    # last three characters of the response are the checksum then \r\n
+                    chk = checksum(value[:-3])
+                    if chk[0] != value[-3]:
+                        print(f'error: motor response failed checksum; {chk[0]} != {value[-3]}')
+                        continue
 
-                return response
+                    return value[:-3].decode('ascii')
+                return None
             except Exception as e:
                 print(f'error: exception `{e}`')
 
@@ -228,9 +238,8 @@ class DomeDaemon:
             return
 
         # Shutter moving?
-        # Prompt will return ? instead of > when it reaches a limit; ignore and reset it
         shutter_status = ShutterStatus.PartiallyOpen
-        response = self.send_command('OPR MV', has_response=True, ignore_error=True)
+        response = self.send_command('OPR MV', has_response=True)
         if response == '1':
             # Shutter is moving
             response = self.send_command('OPR V', has_response=True)
@@ -311,10 +320,10 @@ class DomeDaemon:
         if request == 'stop_shutter':
             self.send_command('OSL 0')
         elif request == 'open_shutter':
-            self.send_command('OMR 100000000', ignore_error=True)
+            self.send_command('OMR 100000000')
             self._shutter_status = ShutterStatus.Opening
         elif request in ['close_shutter', 'heartbeat_expired']:
-            self.send_command('OMR -100000000', ignore_error=True)
+            self.send_command('OMR -100000000')
             self._shutter_status = ShutterStatus.Closing
             if request == 'heartbeat_expired':
                 self._heartbeat_status = HeartbeatStatus.TrippedClosing

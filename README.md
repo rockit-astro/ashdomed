@@ -34,36 +34,12 @@ A configuration file is specified when launching the dome server, and the `dome`
 
 ### Initial Installation
 
-To install and configure on a Raspberry Pi running Raspberry Pi OS 11 (bullseye)
-1. Set static IP by editing `/etc/dhcpcd.conf` to contain:
-   ```
-   interface eth0
-   static ip_address=172.19.0.161
-   static routers=172.19.0.129
-   static domain_name_servers=137.205.205.80 137.205.205.100 137.205.205.129
-   ```
-   
-   If the static IP changes it must also be updated in [`rockit-common`](https://github.com/rockit-astro/rockit-common).
-2. Install dependencies:
-   ```
-   sudo apt install git python3-astropy python3-jsonschema python3-pyro4 python3-serial
-   ```
-3. Clone and install the [`rockit-common`](https://github.com/rockit-astro/rockit-common) python package:
-   ```
-   git clone https://github.com/rockit-astro/rockit-common
-   cd rockit-common
-   sudo make install
-   ```
-4. Clone `ashdomed` and install:
-   ```
-   git clone https://github.com/rockit-astro/ashdomed
-   cd ashdomed
-   sudo make install
-   ```
-6. Enable the systemd service:
-   ```
-   sudo systemctl enable --now ashdomed@warwick
-   ```
+`ashdomed` requires the MDrive communications parameters to be changed from the default and saved to NVRAM for both axes:
+
+ * `BD=48`
+ * `CK=2`
+ * `EM=1`
+
 
 ### Testing Locally
 
