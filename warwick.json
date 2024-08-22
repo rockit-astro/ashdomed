@@ -4,7 +4,7 @@
   "control_machines": ["WarwickDome", "WarwickTCS"],
   "telescope_machines": ["WarwickTCS"],
   "serial_port": "/dev/dome",
-  "serial_baud": 9600,
+  "serial_baud": 4800,
   "serial_timeout": 3,
   "serial_retries": 5,
   "latitude": 52.376861,

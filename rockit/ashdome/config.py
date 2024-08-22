@@ -50,7 +50,8 @@ CONFIG_SCHEMA = {
         },
         'serial_baud': {
             'type': 'integer',
-            'minimum': 0
+            'minimum': 4800,
+            'maximum': 4800
         },
         'serial_timeout': {
             'type': 'number',
