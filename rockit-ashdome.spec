@@ -21,6 +21,7 @@ mkdir -p %{buildroot}%{_udevrulesdir}
 %{__install} %{_sourcedir}/ashdomed@.service %{buildroot}%{_unitdir}
 %{__install} %{_sourcedir}/completion/dome %{buildroot}/etc/bash_completion.d
 
+%{__install} %{_sourcedir}/10-warwick-dome.rules %{buildroot}%{_udevrulesdir}
 %{__install} %{_sourcedir}/warwick.json %{buildroot}%{_sysconfdir}/domed
 
 %package server
@@ -54,5 +55,6 @@ Group:   Unspecified
 %files data-warwick
 %defattr(0644,root,root,-)
 %{_sysconfdir}/domed/warwick.json
+%{_udevrulesdir}/10-warwick-dome.rules
 
 %changelog
