@@ -25,7 +25,7 @@ import time
 import traceback
 import Pyro4
 import serial
-from astropy.coordinates import AltAz, EarthLocation, get_sun, SkyCoord
+from astropy.coordinates import AltAz, EarthLocation, SkyCoord
 from astropy.time import Time
 import astropy.units as u
 import numpy as np
@@ -318,20 +318,25 @@ class DomeDaemon:
             return CommandStatus.Blocked
 
         if request == 'stop_shutter':
+            print('Shutter stopped')
             self.send_command('OSL 0')
         elif request == 'open_shutter':
+            print('Opening shutter')
             self.send_command('OMR 100000000')
             self._shutter_status = ShutterStatus.Opening
         elif request in ['close_shutter', 'heartbeat_expired']:
+            print('Closing shutter')
             self.send_command('OMR -100000000')
             self._shutter_status = ShutterStatus.Closing
             if request == 'heartbeat_expired':
                 self._heartbeat_status = HeartbeatStatus.TrippedClosing
         elif request == 'stop_azimuth':
+            print('Stopping azimuth')
             self.send_command('ASL 0')
             self._tracking_coord = None
         elif request == 'home_azimuth':
             if self._azimuth_status == AzimuthStatus.NotHomed:
+                print('Homing azimuth')
                 self.send_command('AHM 1')
                 self._azimuth_status = AzimuthStatus.Homing
                 self._tracking_coord = None
@@ -352,18 +357,22 @@ class DomeDaemon:
                     target = t
                     separation = s
 
+            print(f'Slewing azimuth to {data:.5f}')
             steps = int((target - self._config.home_azimuth) / 360. * self._config.steps_per_rotation)
             self.send_command(f'AMA {steps}')
             self._azimuth_status = AzimuthStatus.Moving
             self._tracking_coord = None
         elif request == 'track_radec':
+            print(f'Tracking RADec {data[0]:.5f} {data[1]:.5f}')
             coord = SkyCoord(ra=data[0], dec=data[1], unit=u.deg, frame='icrs')
             self.process_request('slew_azimuth', self._altaz_to_dome_azimuth(coord, Time.now()))
             self._tracking_coord = coord
         elif request == 'slew_radec':
+            print(f'Slewing to RADec {data[0]:.5f} {data[1]:.5f}')
             coord = SkyCoord(ra=data[0], dec=data[1], unit=u.deg, frame='icrs')
             self.process_request('slew_azimuth', self._altaz_to_dome_azimuth(coord, Time.now()))
         elif request == 'slew_altaz':
+            print(f'Slewing to AltAz {data[0]:.5f} {data[1]:.5f}')
             self.process_request('slew_azimuth', self._offset_azimuth(data[0], data[1]))
         elif request == 'heartbeat':
             if data == 0:
@@ -382,6 +391,10 @@ class DomeDaemon:
             if self._heartbeat_status != HeartbeatStatus.Disabled:
                 return CommandStatus.EngineeringModeRequiresHeartbeatDisabled
 
+            if data:
+                print('Engineering mode enabled')
+            else:
+                print('Engineering mode disabled')
             self._engineering_mode = data
             if data:
                 self._tracking_coord = None
@@ -419,6 +432,7 @@ class DomeDaemon:
 
                 # Update heartbeat if needed
                 if self._heartbeat_status == HeartbeatStatus.Active and Time.now() > self._heartbeat_expires:
+                    print('Heartbeat expired')
                     self.process_request('heartbeat_expired', None)
 
                 # Slew to park position after homing
