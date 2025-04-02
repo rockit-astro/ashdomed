@@ -361,19 +361,22 @@ class DomeDaemon:
             steps = int((target - self._config.home_azimuth) / 360. * self._config.steps_per_rotation)
             self.send_command(f'AMA {steps}')
             self._azimuth_status = AzimuthStatus.Moving
-            self._tracking_coord = None
         elif request == 'track_radec':
             print(f'Tracking RADec {data[0]:.5f} {data[1]:.5f}')
-            coord = SkyCoord(ra=data[0], dec=data[1], unit=u.deg, frame='icrs')
-            self.process_request('slew_azimuth', self._altaz_to_dome_azimuth(coord, Time.now()))
-            self._tracking_coord = coord
+            self._tracking_coord = SkyCoord(ra=data[0], dec=data[1], unit=u.deg, frame='icrs')
+            az = self._altaz_to_dome_azimuth(self._tracking_coord, Time.now())
+            self.process_request('slew_azimuth', az)
         elif request == 'slew_radec':
             print(f'Slewing to RADec {data[0]:.5f} {data[1]:.5f}')
             coord = SkyCoord(ra=data[0], dec=data[1], unit=u.deg, frame='icrs')
-            self.process_request('slew_azimuth', self._altaz_to_dome_azimuth(coord, Time.now()))
+            az = self._altaz_to_dome_azimuth(coord, Time.now())
+            self._tracking_coord = None
+            self.process_request('slew_azimuth', az)
         elif request == 'slew_altaz':
             print(f'Slewing to AltAz {data[0]:.5f} {data[1]:.5f}')
-            self.process_request('slew_azimuth', self._offset_azimuth(data[0], data[1]))
+            az = self._offset_azimuth(data[0], data[1])
+            self._tracking_coord = None
+            self.process_request('slew_azimuth', az)
         elif request == 'heartbeat':
             if data == 0:
                 self._heartbeat_status = HeartbeatStatus.Disabled
@@ -437,6 +440,7 @@ class DomeDaemon:
 
                 # Slew to park position after homing
                 elif was_homing and self._azimuth_status == AzimuthStatus.Idle:
+                    self._tracking_coord = None
                     self.process_request('slew_azimuth', self._config.park_azimuth)
 
                 # Update tracking coordinate if needed
@@ -455,8 +459,8 @@ class DomeDaemon:
                         future_azimuth = self._altaz_to_dome_azimuth(self._tracking_coord, Time.now() + 1 * u.minute)
                         direction = 1 if future_azimuth > azimuth or future_azimuth < azimuth - 180 else -1
 
-                        target_azimuth = azimuth + direction * self._config.tracking_max_separation
-                        self.process_request('slew_azimuth', target_azimuth)
+                        az = azimuth + direction * self._config.tracking_max_separation
+                        self.process_request('slew_azimuth', az)
 
                 if request is not None:
                     result = self.process_request(request, data)
@@ -607,6 +611,7 @@ class DomeDaemon:
             return CommandStatus.FollowModeActive
 
         with self._comm_lock:
+            self._tracking_coord = None
             self._command_queue.put(('slew_azimuth', azimuth))
             result = self._result_queue.get()
 
@@ -693,6 +698,7 @@ class DomeDaemon:
             return CommandStatus.Succeeded
 
         with self._comm_lock:
+            self._tracking_coord = None
             self._command_queue.put(('slew_azimuth', self._config.park_azimuth))
             return self._result_queue.get()
 
