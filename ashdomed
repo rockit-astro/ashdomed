@@ -229,6 +229,7 @@ class DomeDaemon:
                 return None
             except Exception as e:
                 print(f'error: exception `{e}`')
+                traceback.print_exc(file=sys.stdout)
 
         raise serial.SerialException(f'Command `{command}` failed after {self._config.serial_retries} attempts')
 
