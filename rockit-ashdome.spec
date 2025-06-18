@@ -1,6 +1,6 @@
 Name:      rockit-ashdome
 Version:   %{_version}
-Release:   1
+Release:   1%{dist}
 Summary:   Ash dome daemon
 Url:       https://github.com/rockit-astro/ashdomed
 License:   GPL-3.0
