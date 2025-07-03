@@ -186,7 +186,13 @@ class DomeDaemon:
         Throws exceptions on error.
         """
         def checksum(data):
-            return ((~(sum(data) & 0x7F) + 1) | 128).to_bytes(1, 'big', signed=True)
+            # Simplified equivalent to MCode Programming Guide, page 5-11:
+            # The Check Sum is the 2's complement of the 7 bit sum of the
+            # ASCII value of all the characters in the command ORed with 128
+            temp = sum(data) & 0x7F
+            if temp == 0:
+                return b'\x80'
+            return (256 - temp).to_bytes()
 
         # Ensure the motors have finished processing the previous command
         time.sleep(0.1)
