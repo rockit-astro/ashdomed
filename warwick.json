@@ -1,7 +1,7 @@
 {
   "daemon": "warwick_dome",
   "log_name": "dome@warwick",
-  "control_machines": ["WarwickDome", "WarwickTCS"],
+  "control_machines": ["WarwickTCS"],
   "telescope_machines": ["WarwickTCS"],
   "serial_port": "/dev/dome",
   "serial_baud": 4800,
