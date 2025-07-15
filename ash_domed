@@ -50,9 +50,6 @@ class DomeDaemon:
         self._shutter_status = ShutterStatus.Disconnected
         self._azimuth = 0
 
-        self._heartbeat_status = HeartbeatStatus.Disabled
-        self._heartbeat_expires = None
-
         self._engineering_mode = False
         self._follow_telescope = True
 
@@ -64,6 +61,14 @@ class DomeDaemon:
         self._tracking_coord = None
 
         threading.Thread(target=self.__run, daemon=True).start()
+
+        self._heartbeat_port = None
+        self._heartbeat_status = HeartbeatStatus.Unavailable
+        self._heartbeat_time_remaining = 0
+        self._heartbeat_date = Time.now()
+
+        if self._config.heartbeat_port:
+            threading.Thread(target=self.__monitor_heartbeat, daemon=True).start()
 
     def _wait_until(self, condition, timeout_seconds):
         """
@@ -141,7 +146,6 @@ class DomeDaemon:
 
             with self._state_lock:
                 self._port = port
-                self._heartbeat_status = HeartbeatStatus.Disabled
                 self._azimuth_status = AzimuthStatus.NotHomed
                 self._follow_telescope = True
 
@@ -294,9 +298,6 @@ class DomeDaemon:
             self._azimuth = azimuth_steps * 360.0 / self._config.steps_per_rotation + self._config.home_azimuth
             self._azimuth_status = azimuth_status
 
-            if shutter_status == ShutterStatus.Closed and self._heartbeat_status == HeartbeatStatus.TrippedClosing:
-                self._heartbeat_status = HeartbeatStatus.TrippedIdle
-
     def process_request(self, request, data):
         """
         Process a command sent by the user
@@ -331,12 +332,10 @@ class DomeDaemon:
             print('Opening shutter')
             self.send_command('OMR 100000000')
             self._shutter_status = ShutterStatus.Opening
-        elif request in ['close_shutter', 'heartbeat_expired']:
+        elif request == 'close_shutter':
             print('Closing shutter')
             self.send_command('OMR -100000000')
             self._shutter_status = ShutterStatus.Closing
-            if request == 'heartbeat_expired':
-                self._heartbeat_status = HeartbeatStatus.TrippedClosing
         elif request == 'stop_azimuth':
             print('Stopping azimuth')
             self.send_command('ASL 0')
@@ -384,19 +383,6 @@ class DomeDaemon:
             az = self._offset_azimuth(data[0], data[1])
             self._tracking_coord = None
             self.process_request('slew_azimuth', az)
-        elif request == 'heartbeat':
-            if data == 0:
-                self._heartbeat_status = HeartbeatStatus.Disabled
-                self._heartbeat_expires = None
-            elif self._heartbeat_status == HeartbeatStatus.TrippedClosing:
-                return CommandStatus.HeartbeatCloseInProgress
-            elif self._heartbeat_status == HeartbeatStatus.TrippedIdle:
-                return CommandStatus.HeartbeatTimedOut
-            elif data < 0 or data >= 180:
-                return CommandStatus.HeartbeatInvalidTimeout
-            else:
-                self._heartbeat_status = HeartbeatStatus.Active
-                self._heartbeat_expires = Time.now() + data * u.s
         elif request == 'engineering_mode':
             if self._heartbeat_status != HeartbeatStatus.Disabled:
                 return CommandStatus.EngineeringModeRequiresHeartbeatDisabled
@@ -413,6 +399,88 @@ class DomeDaemon:
             return CommandStatus.Failed
 
         return CommandStatus.Succeeded
+
+    def __monitor_heartbeat(self):
+        """Monitors the heartbeat timer and close the dome if it expires"""
+        first_connection = True
+        while True:
+            # Initial setup
+            try:
+                self._heartbeat_port = serial.Serial(self._config.heartbeat_port,
+                                                     self._config.heartbeat_baud,
+                                                     timeout=self._config.heartbeat_timeout_seconds)
+
+                print('Connected to heartbeat monitor on', self._config.heartbeat_port)
+                prefix = 'Established' if first_connection else 'Restored'
+                log.info(self._config.log_name, prefix + ' USB connection to heartbeat monitor')
+                first_connection = False
+            except Exception as exception:
+                print('Failed to open heartbeat monitor connection with error:')
+                print(exception)
+                print('Will retry in 5 seconds...')
+                if self._heartbeat_status != HeartbeatStatus.Unavailable:
+                    log.error(self._config.log_name, 'Failed to connect to heartbeat monitor')
+                time.sleep(5.)
+
+                self._heartbeat_status = HeartbeatStatus.Unavailable
+                continue
+
+            try:
+                # Flush any stale state
+                self._heartbeat_port.flushInput()
+                self._heartbeat_port.flushOutput()
+                self._heartbeat_status = HeartbeatStatus.Disabled
+
+                # Main run loop
+                while True:
+                    data = self._heartbeat_port.read(1)
+                    if not data:
+                        raise serial.SerialTimeoutException('Heartbeat serial read timeout')
+
+                    status = data[-1]
+                    time_remaining = 0
+                    if data[-1] == 252:
+                        if self._heartbeat_status != HeartbeatStatus.Scanning:
+                            log.error(self._config.log_name, 'Heartbeat monitor is scanning for dome unit')
+                        status = HeartbeatStatus.Scanning
+                    elif data[-1] == 253:
+                        if self._heartbeat_status != HeartbeatStatus.Connecting:
+                            log.error(self._config.log_name, 'Heartbeat monitor is connecting to dome unit')
+                        status = HeartbeatStatus.Connecting
+                    elif data[-1] == 254:
+                        if self._heartbeat_status != HeartbeatStatus.TrippedClosing:
+                            log.error(self._config.log_name, 'Heartbeat monitor is closing dome')
+                        status = HeartbeatStatus.TrippedClosing
+                    elif data[-1] == 255:
+                        if self._heartbeat_status != HeartbeatStatus.TrippedIdle:
+                            log.info(self._config.log_name, 'Heartbeat monitor has finished closing dome')
+                        status = HeartbeatStatus.TrippedIdle
+                    elif data[-1] == 0:
+                        if self._heartbeat_status != HeartbeatStatus.Disabled:
+                            log.info(self._config.log_name, 'Heartbeat disabled')
+                        status = HeartbeatStatus.Disabled
+                    else:
+                        if self._heartbeat_status != HeartbeatStatus.Active:
+                            log.info(self._config.log_name, 'Heartbeat enabled')
+                        status = HeartbeatStatus.Active
+                        time_remaining = data[-1]
+
+                    with self._state_lock:
+                        self._heartbeat_date = Time.now()
+                        self._heartbeat_status = status
+                        self._heartbeat_time_remaining = time_remaining
+
+            except Exception as exception:
+                self._heartbeat_port.close()
+                with self._state_lock:
+                    self._heartbeat_date = Time.now()
+                    self._heartbeat_status = HeartbeatStatus.Unavailable
+                    self._heartbeat_time_remaining = 0
+
+                print(exception)
+                print('Will retry in 5 seconds...')
+                log.error(self._config.log_name, 'Failed to read heartbeat monitor')
+                time.sleep(5.)
 
     def __run(self):
         """Background thread managing communication over the serial connection"""
@@ -440,13 +508,8 @@ class DomeDaemon:
             try:
                 self._update_state()
 
-                # Update heartbeat if needed
-                if self._heartbeat_status == HeartbeatStatus.Active and Time.now() > self._heartbeat_expires:
-                    print('Heartbeat expired')
-                    self.process_request('heartbeat_expired', None)
-
                 # Slew to park position after homing
-                elif was_homing and self._azimuth_status == AzimuthStatus.Idle:
+                if was_homing and self._azimuth_status == AzimuthStatus.Idle:
                     self._tracking_coord = None
                     self.process_request('slew_azimuth', self._config.park_azimuth)
 
@@ -496,10 +559,6 @@ class DomeDaemon:
                         self._move_complete_condition.notify_all()
 
                 delay = self._config.moving_loop_delay if is_moving else self._config.idle_loop_delay
-
-                if self._heartbeat_status == HeartbeatStatus.Active and \
-                        self._heartbeat_expires < Time.now() + delay * u.s:
-                    delay = 1
 
     @Pyro4.expose
     def open_shutter(self, blocking=True, override=False):
@@ -740,9 +799,23 @@ class DomeDaemon:
         if not pyro_client_matches(self._config.control_ips):
             return CommandStatus.InvalidControlIP
 
-        with self._comm_lock:
-            self._command_queue.put(('heartbeat', timeout))
-            return self._result_queue.get()
+        if self._engineering_mode:
+            return CommandStatus.EngineeringModeActive
+
+        if self._heartbeat_status == HeartbeatStatus.Unavailable:
+            return CommandStatus.HeartbeatUnavailable
+
+        if timeout != 0 and self._heartbeat_status == HeartbeatStatus.TrippedClosing:
+            return CommandStatus.HeartbeatCloseInProgress
+
+        if timeout != 0 and self._heartbeat_status == HeartbeatStatus.TrippedIdle:
+            return CommandStatus.HeartbeatTimedOut
+
+        if timeout < 0 or timeout >= 240:
+            return CommandStatus.HeartbeatInvalidTimeout
+
+        length = self._heartbeat_port.write(bytes([timeout]))
+        return CommandStatus.Succeeded if length == 1 else CommandStatus.Failed
 
     @Pyro4.expose
     def initialize(self):
@@ -774,7 +847,11 @@ class DomeDaemon:
                 'azimuth_status_label': AzimuthStatus.label(AzimuthStatus.Disconnected),
                 'shutter': ShutterStatus.Disconnected,
                 'shutter_label': ShutterStatus.label(ShutterStatus.Disconnected),
-                'engineering_mode': self._engineering_mode
+                'engineering_mode': self._engineering_mode,
+                'heartbeat_date': self._heartbeat_date.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'heartbeat_status': self._heartbeat_status,
+                'heartbeat_status_label': HeartbeatStatus.label(self._heartbeat_status),
+                'heartbeat_remaining': self._heartbeat_time_remaining
             }
 
             if self._port is None:
@@ -789,12 +866,7 @@ class DomeDaemon:
                 'shutter': self._shutter_status,
                 'shutter_label': ShutterStatus.label(self._shutter_status),
                 'closed': self._shutter_status == ShutterStatus.Closed,
-                'heartbeat_status': self._heartbeat_status,
-                'heartbeat_status_label': HeartbeatStatus.label(self._heartbeat_status),
             })
-
-            if self._heartbeat_expires is not None:
-                data['heartbeat_remaining'] = max((self._heartbeat_expires - Time.now()).to_value(u.s), 0)
 
             if self._tracking_coord is not None:
                 frame = AltAz(obstime=Time.now(), location=self._location)

@@ -72,8 +72,7 @@ def print_status(config, _):
     with config.daemon.connect() as dome:
         status = dome.status()
 
-    date = datetime.datetime.strptime(status['date'], '%Y-%m-%dT%H:%M:%SZ')
-    print(f'Dome status at: [b]{date}[/b]:')
+    print(f'Dome status at: [b]{status["date"]}[/b]:')
     if status['azimuth_status'] in [AzimuthStatus.Idle, AzimuthStatus.Moving]:
         azimuth_label = f'    Azimuth: [b]{status["azimuth"]:.1f}\u00B0[/b]'
         if status['azimuth_status'] == AzimuthStatus.Moving:
@@ -96,10 +95,11 @@ def print_status(config, _):
 
     eng_mode = '[red]ENABLED[/red]' if status['engineering_mode'] else '[green]DISABLED[/green]'
     print(f'  Eng. mode: [b]{eng_mode}[/b]')
-    if 'heartbeat_status' in status:
-        print(f'  Heartbeat: {HeartbeatStatus.label(status["heartbeat_status"], formatting=True)}')
-        if status['heartbeat_status'] == HeartbeatStatus.Active:
-            print(f'Time remaining: [b]{status["heartbeat_remaining"]:.1f}[/b]')
+    print(f'Heartbeat status at [b]{status["heartbeat_date"]}[/b]:')
+    print('        Monitor: ' + HeartbeatStatus.label(status['heartbeat_status'], formatting=True))
+    if status['heartbeat_status'] == 1:
+        print(f'Time remaining: [b]{status["heartbeat_remaining"]}[/b]')
+
     return 0
 
 

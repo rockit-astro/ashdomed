@@ -143,20 +143,26 @@ class ShutterStatus:
 
 class HeartbeatStatus:
     """Status of the dome heartbeat monitoring"""
-    Disabled, Active, TrippedClosing, TrippedIdle = range(4)
+    Disabled, Active, TrippedClosing, TrippedIdle, Unavailable, Scanning, Connecting = range(7)
 
     _labels = {
         0: 'DISABLED',
         1: 'ACTIVE',
         2: 'CLOSING DOME',
-        3: 'TRIPPED'
+        3: 'TRIPPED',
+        4: 'UNAVAILABLE',
+        5: 'SCANNING',
+        6: 'CONNECTING'
     }
 
     _colors = {
         0: 'default',
         1: 'green',
         2: 'red',
-        3: 'red'
+        3: 'red',
+        4: 'yellow',
+        5: 'yellow',
+        6: 'yellow'
     }
 
     @classmethod

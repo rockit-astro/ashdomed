@@ -26,6 +26,7 @@ CONFIG_SCHEMA = {
     'additionalProperties': False,
     'required': [
         'daemon', 'log_name', 'control_machines', 'serial_port', 'serial_baud', 'serial_timeout', 'serial_retries',
+        'heartbeat_port', 'heartbeat_baud', 'heartbeat_timeout',
         'latitude', 'longitude', 'altitude', 'steps_per_rotation', 'dome_radius_cm', 'telescope_offset_x_cm',
         'home_azimuth', 'park_azimuth', 'tracking_max_separation', 'idle_loop_delay', 'moving_loop_delay',
         'azimuth_move_timeout', 'shutter_move_timeout', 'telescope_machines'
@@ -58,6 +59,17 @@ CONFIG_SCHEMA = {
             'minimum': 0
         },
         'serial_retries': {
+            'type': 'number',
+            'minimum': 0
+        },
+        'heartbeat_port': {
+            'type': 'string'
+        },
+        'heartbeat_baud': {
+            'type': 'integer',
+            'minimum': 0
+        },
+        'heartbeat_timeout': {
             'type': 'number',
             'minimum': 0
         },
@@ -147,6 +159,9 @@ class Config:
         self.serial_baud = config_json['serial_baud']
         self.serial_timeout = config_json['serial_timeout']
         self.serial_retries = config_json['serial_retries']
+        self.heartbeat_port = config_json['heartbeat_port']
+        self.heartbeat_baud = config_json['heartbeat_baud']
+        self.heartbeat_timeout_seconds = config_json['heartbeat_timeout']
         self.steps_per_rotation = config_json['steps_per_rotation']
         self.dome_radius_cm = config_json['dome_radius_cm']
         self.telescope_offset_x_cm = config_json['telescope_offset_x_cm']
