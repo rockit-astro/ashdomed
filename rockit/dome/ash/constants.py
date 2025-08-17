@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with rockit.  If not, see <http://www.gnu.org/licenses/>.
 
-"""Constants and status codes used by ashdomed"""
+"""Constants and status codes used by ash_domed"""
 
 
 class CommandStatus:

@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with rockit.  If not, see <http://www.gnu.org/licenses/>.
 
-"""Commandline client for controlling ashdomed"""
+"""Commandline client for controlling ash dome"""
 
 import datetime
 import glob
@@ -24,7 +24,7 @@ import sys
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 import Pyro4
-from rockit.ashdome import Config, CommandStatus, AzimuthStatus, ShutterStatus, HeartbeatStatus
+from rockit.dome.ash import Config, CommandStatus, AzimuthStatus, ShutterStatus, HeartbeatStatus
 from rockit.common import print
 
 SCRIPT_NAME = os.path.basename(sys.argv[0])

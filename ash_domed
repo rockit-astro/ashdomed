@@ -31,7 +31,7 @@ import astropy.units as u
 import numpy as np
 from rockit.common import log
 from rockit.common.helpers import pyro_client_matches
-from rockit.ashdome import Config, CommandStatus, AzimuthStatus, ShutterStatus, HeartbeatStatus
+from rockit.dome.ash import Config, CommandStatus, AzimuthStatus, ShutterStatus, HeartbeatStatus
 
 
 class DomeDaemon:

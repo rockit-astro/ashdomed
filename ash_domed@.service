@@ -7,7 +7,7 @@ After=network-online.target
 [Service]
 Restart=on-failure
 Type=simple
-ExecStart=/usr/bin/env python3 -u /usr/bin/ashdomed /etc/domed/%i.json
+ExecStart=/usr/bin/env python3 -u /usr/bin/ash_domed /etc/domed/%i.json
 
 [Install]
 WantedBy=multi-user.target

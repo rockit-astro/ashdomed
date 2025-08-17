@@ -1,10 +1,10 @@
 ## Ash Dome daemon
 
-`ashdomed` communicates with the MDrive motors attached via RS422 adaptor. Control is exposed via Pyro.
+`ash_domed` communicates with the MDrive motors attached via RS422 adaptor. Control is exposed via Pyro.
 
 `dome` is a commandline utility that interfaces with the dome daemon.
 
-`python3-rockit-ashdome` is a python module with the common dome code.
+`python3-rockit-dome-ash` is a python module with the common dome code.
 
 ### Configuration
 
@@ -34,7 +34,7 @@ A configuration file is specified when launching the dome server, and the `dome`
 
 ### Initial Installation
 
-`ashdomed` requires the MDrive communications parameters to be changed from the default and saved to NVRAM for both axes:
+`ash_domed` requires the MDrive communications parameters to be changed from the default and saved to NVRAM for both axes:
 
  * `BD=48`
  * `CK=2`
@@ -45,6 +45,6 @@ A configuration file is specified when launching the dome server, and the `dome`
 
 The dome server and client can be run directly from a git clone:
 ```
-./ashdomed warwick.json
+./ash_domed warwick.json
 DOMED_CONFIG_PATH=./warwick.json ./dome status
 ```

@@ -1,9 +1,9 @@
-Name:           python3-rockit-ashdome
+Name:           python3-rockit-dome-ash
 Version:        %{_version}
 Release:        1%{dist}
 License:        GPL3
 Summary:        Common backend code for the ash dome daemon.
-Url:            https://github.com/rockit-astro/ashdomed
+Url:            https://github.com/rockit-astro/domed-ash
 BuildArch:      noarch
 BuildRequires:  python3-devel
 

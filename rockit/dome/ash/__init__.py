@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with rockit.  If not, see <http://www.gnu.org/licenses/>.
 
-"""ashdomed common code"""
+"""ash_domed common code"""
 
 from .constants import CommandStatus, AzimuthStatus, ShutterStatus, HeartbeatStatus
 from .config import Config

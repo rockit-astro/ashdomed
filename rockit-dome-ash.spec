@@ -1,8 +1,8 @@
-Name:      rockit-ashdome
+Name:      rockit-dome-ash
 Version:   %{_version}
 Release:   1%{dist}
 Summary:   Ash dome daemon
-Url:       https://github.com/rockit-astro/ashdomed
+Url:       https://github.com/rockit-astro/domed-ash
 License:   GPL-3.0
 BuildArch: noarch
 
@@ -17,8 +17,8 @@ mkdir -p %{buildroot}%{_sysconfdir}/domed
 mkdir -p %{buildroot}%{_udevrulesdir}
 
 %{__install} %{_sourcedir}/dome %{buildroot}%{_bindir}
-%{__install} %{_sourcedir}/ashdomed %{buildroot}%{_bindir}
-%{__install} %{_sourcedir}/ashdomed@.service %{buildroot}%{_unitdir}
+%{__install} %{_sourcedir}/ash_domed %{buildroot}%{_bindir}
+%{__install} %{_sourcedir}/ash_domed@.service %{buildroot}%{_unitdir}
 %{__install} %{_sourcedir}/completion/dome %{buildroot}/etc/bash_completion.d
 
 %{__install} %{_sourcedir}/10-warwick-dome.rules %{buildroot}%{_udevrulesdir}
@@ -27,19 +27,19 @@ mkdir -p %{buildroot}%{_udevrulesdir}
 %package server
 Summary:  Dome server
 Group:    Unspecified
-Requires: python3-rockit-ashdome
+Requires: python3-rockit-dome-ash
 %description server
 
 %files server
 %defattr(0755,root,root,-)
-%{_bindir}/ashdomed
+%{_bindir}/ash_domed
 %defattr(0644,root,root,-)
-%{_unitdir}/ashdomed@.service
+%{_unitdir}/ash_domed@.service
 
 %package client
 Summary:  Dome client
 Group:    Unspecified
-Requires: python3-rockit-ashdome
+Requires: python3-rockit-dome-ash
 %description client
 
 %files client
